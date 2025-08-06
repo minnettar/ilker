@@ -14,14 +14,15 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
 
+S
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-
 credentials = Credentials.from_service_account_info(st.secrets, scopes=SCOPES)
 gc = gspread.authorize(credentials)
+sh = gc.open_by_key("1oQecN1xnsi9Eir0z3yyGWBcpOUKpg13lT_pAr5zp5AM")
 
 
 
