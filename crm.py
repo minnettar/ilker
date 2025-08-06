@@ -26,7 +26,6 @@ credentials = Credentials.from_service_account_info(
 )
 
 gc = gspread.authorize(credentials)
-sh = gc.open_by_key("1oQecN1xnsi9Eir0z3yyGWBcpOUKpg13lT_pAr5zp5AM")
 
 
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
