@@ -11,6 +11,17 @@ import numpy as np
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread_dataframe import get_as_dataframe, set_with_dataframe
+import json
+import os
+
+# Streamlit secrets'ten oku
+service_account_info = st.secrets["SERVICE_ACCOUNT_JSON"]
+if isinstance(service_account_info, str):
+    service_account_info = json.loads(service_account_info)
+
+# JSON'u dosya gibi kullanmak için:
+with open("service_account.json", "w") as f:
+    json.dump(service_account_info, f)
 
 
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
