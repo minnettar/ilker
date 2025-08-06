@@ -14,7 +14,6 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
 
-S
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
