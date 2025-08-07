@@ -17,7 +17,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 sheet_id = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
-)
+
 gc = gspread.authorize(credentials)
 sh = gc.open_by_key(sheet_id)
 
