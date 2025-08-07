@@ -16,6 +16,48 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from fpdf import FPDF
 import tempfile
+from google_auth_oauthlib.flow import Flow
+from google.auth.transport.requests import Request
+import pickle
+import os
+
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+CLIENT_SECRET_FILE = "client_secret_370619069251-kl99fgfn1noumguvm5gej1gn257jiaku.apps.googleusercontent.com.json"
+SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
+
+def get_gspread_client():
+    creds = None
+    # Token dosyası var mı? (Daha önce giriş yaptıysa)
+    if os.path.exists("token.pickle"):
+        with open("token.pickle", "rb") as token:
+            creds = pickle.load(token)
+    # Token yoksa, kullanıcıdan yetki al
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = Flow.from_client_secrets_file(
+                CLIENT_SECRET_FILE, SCOPES,
+                redirect_uri="https://sekerexpo.streamlit.app/"
+            )
+            auth_url, _ = flow.authorization_url(prompt='consent')
+            st.write(f"Yetki için [Google hesabınızla giriş yapın]({auth_url})")
+            code = st.text_input("Yukarıdaki linkten kodu alın ve buraya yapıştırın")
+            if code:
+                flow.fetch_token(code=code)
+                creds = flow.credentials
+                with open("token.pickle", "wb") as token:
+                    pickle.dump(creds, token)
+    # Gspread Client oluştur
+    client = gspread.authorize(creds)
+    return client
+
+# --- Ana kod ---
+gc = get_gspread_client()
+sh = gc.open_by_key(SHEET_ID)
+worksheet = sh.worksheet("Sayfa1")
+df = pd.DataFrame(worksheet.get_all_records())
+st.dataframe(df)
 
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
