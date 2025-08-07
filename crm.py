@@ -1,16 +1,44 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import os
-import io
 import datetime
+import numpy as np
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import smtplib
 from email.message import EmailMessage
-import tempfile 
+import io
 
-# ==== KULLANICI GİRİŞİ SİSTEMİ ====
+# --- Google Sheets Ayarları ---
+SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"  # Sheet ID'ni kendi sheet'inle değiştir
+SERVICE_ACCOUNT_FILE = "ilkercrm-81081623bf14.json"  # Service account json dosya adı (cloud'da secrets üzerinden okunacaksa ayarla)
+
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+creds = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE,
+    scopes=SCOPES
+)
+service = build('sheets', 'v4', credentials=creds)
+sheet = service.spreadsheets()
+
+# --- Fonksiyonlar (Google Sheet'le okuma/yazma) ---
+def sheet_to_df(sheet, sheet_id, sheet_name):
+    result = sheet.values().get(spreadsheetId=sheet_id, range=sheet_name).execute()
+    values = result.get('values', [])
+    if not values:
+        return pd.DataFrame()
+    return pd.DataFrame(values[1:], columns=values[0])
+
+def df_to_sheet(sheet, sheet_id, sheet_name, df):
+    values = [df.columns.tolist()] + df.fillna("").astype(str).values.tolist()
+    sheet.values().update(
+        spreadsheetId=sheet_id,
+        range=sheet_name,
+        valueInputOption="RAW",
+        body={"values": values}
+    ).execute()
+
+# --- Login Sistemi ---
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
 
 USERS = {
@@ -39,7 +67,6 @@ if not st.session_state.user:
     login_screen()
     st.stop()
 
-# Sol menüde çıkış butonu
 if st.sidebar.button("Çıkış Yap"):
     st.session_state.user = None
     st.rerun()
@@ -72,109 +99,48 @@ ulke_listesi = sorted([
     "Yemen", "Yeni Zelanda", "Yunanistan", "Zambiya", "Zimbabve"
 ]) + ["Diğer"]
 
-temsilci_listesi = [
-    "KEMAL İLKER ÇELİKKALKAN",
-    "HÜSEYİN POLAT",
-    "EFE YILDIRIM",
-    "FERHAT ŞEKEROĞLU"
-]
+temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIRIM", "FERHAT ŞEKEROĞLU"]
 
-# --- LOGO URL'inden SVG GÖSTER ---
+# --- LOGO ---
 LOGO_URL = "https://www.sekeroglugroup.com/storage/settings/xdp5r6DZIFJMNGOStqwvKCiVHDhYxA84jFr61TNp.svg"
-
-col1, col2 = st.columns([2, 8])
+col1, col2 = st.columns([3, 7])
 with col1:
-    st.markdown(
-        f"""
-        <img src="{LOGO_URL}" width="180" style="margin-bottom:12px;margin-top:-10px;" />
-        """,
-        unsafe_allow_html=True,
-    )
+    st.image(LOGO_URL, width=300)
 with col2:
     st.markdown("""
-        <h1 style="color: #219A41; font-weight: bold; font-size: 2.6em; letter-spacing:2px; margin:0; margin-top:-8px;">
-            ŞEKEROĞLU İHRACAT CRM
-        </h1>
+        <style>
+        .block-container { padding-top: 0.2rem !important; }
+        </style>
+        <div style="display:flex; flex-direction:column; align-items:flex-start; width:100%; margin-bottom:10px;">
+            <h1 style="color: #219A41; font-weight: bold; font-size: 2.8em; letter-spacing:2px; margin:0; margin-top:-8px;">
+                ŞEKEROĞLU İHRACAT CRM
+            </h1>
+        </div>
     """, unsafe_allow_html=True)
 
-    import streamlit as st
-import pandas as pd
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-
-# --- Service Account ve Sheet Kimlikleri ---
-SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-SHEET_NAMES = {
-    "df_musteri": "Sayfa1",
-    "df_kayit": "Kayıtlar",
-    "df_teklif": "Teklifler",
-    "df_proforma": "Proformalar",
-    "df_evrak": "Evraklar",
-    "df_eta": "ETA",
-    "df_fuar_musteri": "FuarMusteri"
-}
-
-# --- Google Sheets API Bağlantısı ---
-@st.cache_resource
-def get_service():
-    credentials = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=SCOPES
-    )
-    service = build("sheets", "v4", credentials=credentials)
-    return service.spreadsheets()
-
-sheet = get_service()
-
-# --- Sheet'ten DataFrame Yükleme ---
-def sheet_to_df(sheet_name, header_row=1):
-    result = sheet.values().get(
-        spreadsheetId=SHEET_ID,
-        range=sheet_name
-    ).execute()
-    values = result.get("values", [])
-    if not values or len(values) < header_row:
-        return pd.DataFrame()
-    return pd.DataFrame(values[header_row:], columns=values[header_row - 1])
-
-# --- DataFrame'i Sheet'e Yazma ---
-def df_to_sheet(df, sheet_name):
-    values = [df.columns.tolist()] + df.astype(str).fillna("").values.tolist()
-    sheet.values().update(
-        spreadsheetId=SHEET_ID,
-        range=sheet_name,
-        valueInputOption="RAW",
-        body={"values": values}
-    ).execute()
-
-# --- DataFrame Yükle (Her sheet için) ---
-df_musteri = sheet_to_df(SHEET_NAMES["df_musteri"])
-if df_musteri.empty:
+# --- Sheetlerden DataFrame'e Yükle ---
+try:
+    df_musteri = sheet_to_df(sheet, SHEET_ID, "Sayfa1")
+except Exception:
     df_musteri = pd.DataFrame(columns=[
-        "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke",
-        "Satış Temsilcisi", "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli"
+        "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke", "Satış Temsilcisi", "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli",
+        "Para Birimi", "DT Seçimi"
     ])
-
-df_kayit = sheet_to_df(SHEET_NAMES["df_kayit"])
-if df_kayit.empty:
-    df_kayit = pd.DataFrame(columns=["Müşteri Adı", "Tarih", "Tip", "Açıklama"])
-
-df_teklif = sheet_to_df(SHEET_NAMES["df_teklif"])
-if df_teklif.empty:
+try:
+    df_teklif = sheet_to_df(sheet, SHEET_ID, "Teklifler")
+except Exception:
     df_teklif = pd.DataFrame(columns=[
-        "Müşteri Adı", "Tarih", "Teklif No", "Tutar",
-        "Ürün/Hizmet", "Açıklama", "Durum", "PDF"
+        "Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama", "Durum", "PDF"
     ])
-
-df_proforma = sheet_to_df(SHEET_NAMES["df_proforma"])
-if df_proforma.empty:
+try:
+    df_proforma = sheet_to_df(sheet, SHEET_ID, "Proformalar")
+except Exception:
     df_proforma = pd.DataFrame(columns=[
-        "Müşteri Adı", "Tarih", "Proforma No", "Tutar", "Açıklama",
-        "Durum", "PDF", "Sipariş Formu", "Vade", "Sevk Durumu"
+        "Müşteri Adı", "Tarih", "Proforma No", "Tutar", "Açıklama", "Durum", "PDF", "Sipariş Formu", "Vade", "Sevk Durumu"
     ])
-
-df_evrak = sheet_to_df(SHEET_NAMES["df_evrak"])
-if df_evrak.empty:
+try:
+    df_evrak = sheet_to_df(sheet, SHEET_ID, "Evraklar")
+except Exception:
     df_evrak = pd.DataFrame(columns=[
         "Müşteri Adı", "Fatura No", "Fatura Tarihi", "Vade Tarihi", "Tutar",
         "Commercial Invoice", "Sağlık Sertifikası", "Packing List",
@@ -182,27 +148,7 @@ if df_evrak.empty:
         "Yük Resimleri", "EK Belgeler"
     ])
 
-df_eta = sheet_to_df(SHEET_NAMES["df_eta"])
-if df_eta.empty:
-    df_eta = pd.DataFrame(columns=["Müşteri Adı", "Proforma No", "ETA Tarihi", "Açıklama"])
-
-df_fuar_musteri = sheet_to_df(SHEET_NAMES["df_fuar_musteri"])
-if df_fuar_musteri.empty:
-    df_fuar_musteri = pd.DataFrame(columns=[
-        "Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail", "Açıklamalar", "Tarih"
-    ])
-
-# --- Tüm DataFrame'leri Sheet'e Güncelleme Fonksiyonu ---
-def update_all_sheets():
-    df_to_sheet(df_musteri, SHEET_NAMES["df_musteri"])
-    df_to_sheet(df_kayit, SHEET_NAMES["df_kayit"])
-    df_to_sheet(df_teklif, SHEET_NAMES["df_teklif"])
-    df_to_sheet(df_proforma, SHEET_NAMES["df_proforma"])
-    df_to_sheet(df_evrak, SHEET_NAMES["df_evrak"])
-    df_to_sheet(df_eta, SHEET_NAMES["df_eta"])
-    df_to_sheet(df_fuar_musteri, SHEET_NAMES["df_fuar_musteri"])
-
-    # --- Menü Stili ---
+# --- Menü Butonları ---
 st.sidebar.markdown("""
 <style>
 .menu-btn {
@@ -231,7 +177,6 @@ st.sidebar.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Menü Butonları (kullanıcıya göre) ---
 menuler = [
     ("Özet Ekran", "menu-ozet", "📊"),
     ("Cari Ekleme", "menu-cari", "🧑‍💼"),
@@ -247,7 +192,6 @@ menuler = [
     ("Medya Çekmecesi", "menu-medya", "🗂️"),
 ]
 
-# Kullanıcıya özel menü kontrolü
 if st.session_state.user == "Boss":
     allowed_menus = [("Özet Ekran", "menu-ozet", "📊")]
 else:
@@ -262,30 +206,27 @@ for i, (isim, renk, ikon) in enumerate(allowed_menus):
 
 menu = st.session_state.menu_state
 
-def yeni_cari_txt_olustur(cari_dict):
-    txt_content = (
-        f"Müşteri Adı: {cari_dict['Müşteri Adı']}\n"
-        f"Telefon: {cari_dict['Telefon']}\n"
-        f"E-posta: {cari_dict['E-posta']}\n"
-        f"Adres: {cari_dict['Adres']}\n"
-        f"Ülke: {cari_dict.get('Ülke', '')}\n"
-        f"Satış Temsilcisi: {cari_dict.get('Satış Temsilcisi', '')}\n"
-        f"Kategori: {cari_dict.get('Kategori', '')}\n"
-        f"Durum: {cari_dict.get('Durum', '')}\n"
-        f"Vade (Gün): {cari_dict.get('Vade (Gün)', '')}\n"
-        f"Ödeme Şekli: {cari_dict.get('Ödeme Şekli', '')}\n"
-        f"Para Birimi: {cari_dict.get('Para Birimi', '')}\n"
-        f"DT Seçimi: {cari_dict.get('DT Seçimi', '')}\n"
-    )
-    # Geçici dosya ile bulutta güvenli kaydet
-    temp = tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".txt", encoding="utf-8")
-    temp.write(txt_content)
-    temp.flush()
-    return temp.name  # Dosya yolunu döndür
+# --- Yeni Cari için txt oluştur ve e-posta gönder ---
+def yeni_cari_txt_olustur(cari_dict, file_path="yeni_cari.txt"):
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(
+            f"Müşteri Adı: {cari_dict['Müşteri Adı']}\n"
+            f"Telefon: {cari_dict['Telefon']}\n"
+            f"E-posta: {cari_dict['E-posta']}\n"
+            f"Adres: {cari_dict['Adres']}\n"
+            f"Ülke: {cari_dict.get('Ülke', '')}\n"
+            f"Satış Temsilcisi: {cari_dict.get('Satış Temsilcisi', '')}\n"
+            f"Kategori: {cari_dict.get('Kategori', '')}\n"
+            f"Durum: {cari_dict.get('Durum', '')}\n"
+            f"Vade (Gün): {cari_dict.get('Vade (Gün)', '')}\n"
+            f"Ödeme Şekli: {cari_dict.get('Ödeme Şekli', '')}\n"
+            f"Para Birimi: {cari_dict.get('Para Birimi', '')}\n"
+            f"DT Seçimi: {cari_dict.get('DT Seçimi', '')}\n"
+        )
 
 def send_email_with_txt(to_email, subject, body, file_path):
     from_email = "todo@sekeroglugroup.com"
-    password = st.secrets["MAIL_PASSWORD"]  # Şifreyi secrets.toml'a taşı!
+    password = "vbgvforwwbcpzhxf"
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = from_email
@@ -302,127 +243,52 @@ def send_email_with_txt(to_email, subject, body, file_path):
         smtp.login(from_email, password)
         smtp.send_message(msg)
 
-if menu == "Özet Ekran":
-    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ŞEKEROĞLU İHRACAT CRM - Özet Ekran</h2>", unsafe_allow_html=True)
-
-    # ---- Bekleyen Teklifler Tablosu ----
-    st.markdown("### 💰 Bekleyen Teklifler")
-    bekleyen_teklifler = df_teklif[df_teklif["Durum"] == "Açık"] if "Durum" in df_teklif.columns else pd.DataFrame()
-    try:
-        toplam_teklif = pd.to_numeric(bekleyen_teklifler["Tutar"], errors="coerce").sum()
-    except Exception:
-        toplam_teklif = 0
-    st.markdown(f"<div style='font-size:1.3em; color:#11998e; font-weight:bold;'>Toplam: {toplam_teklif:,.2f} $</div>", unsafe_allow_html=True)
-    if bekleyen_teklifler.empty:
-        st.info("Bekleyen teklif yok.")
-    else:
-        st.dataframe(
-            bekleyen_teklifler[["Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama"]],
-            use_container_width=True
-        )
-
-    # ---- Bekleyen Proformalar Tablosu ----
-    st.markdown("### 📄 Bekleyen Proformalar")
-    bekleyen_proformalar = df_proforma[df_proforma["Durum"] == "Beklemede"] if "Durum" in df_proforma.columns else pd.DataFrame()
-    try:
-        toplam_proforma = pd.to_numeric(bekleyen_proformalar["Tutar"], errors="coerce").sum()
-    except Exception:
-        toplam_proforma = 0
-    st.markdown(f"<div style='font-size:1.3em; color:#f7971e; font-weight:bold;'>Toplam: {toplam_proforma:,.2f} $</div>", unsafe_allow_html=True)
-    if bekleyen_proformalar.empty:
-        st.info("Bekleyen proforma yok.")
-    else:
-        st.dataframe(
-            bekleyen_proformalar[["Müşteri Adı", "Proforma No", "Tarih", "Tutar", "Açıklama"]],
-            use_container_width=True
-        )
-
-    # ---- Siparişe Dönüşen (Sevk Bekleyen) Tablosu (Termin Tarihine Göre) ----
-    st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
-    for col in ["Sevk Durumu", "Termin Tarihi", "Satış Temsilcisi", "Ödeme Şekli", "Ülke"]:
-        if col not in df_proforma.columns:
-            df_proforma[col] = ""
-    siparisler = df_proforma[
-        (df_proforma["Durum"] == "Siparişe Dönüştü") &
-        (~df_proforma["Sevk Durumu"].isin(["Sevkedildi", "Ulaşıldı"]))
-    ].copy()
-    siparisler["Termin Tarihi Order"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce")
-    siparisler = siparisler.sort_values("Termin Tarihi Order", ascending=True)
-    if siparisler.empty:
-        st.info("Henüz sevk edilmeyi bekleyen sipariş yok.")
-    else:
-        siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-        siparisler["Termin Tarihi"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
-        tablo = siparisler[
-            ["Tarih", "Müşteri Adı", "Termin Tarihi", "Ülke", "Satış Temsilcisi", "Ödeme Şekli", "Proforma No", "Tutar", "Açıklama"]
-        ]
-        st.dataframe(tablo, use_container_width=True)
-        try:
-            toplam = pd.to_numeric(siparisler["Tutar"], errors="coerce").sum()
-        except Exception:
-            toplam = 0
-        st.markdown(f"<div style='color:#219A41; font-weight:bold;'>*Toplam Bekleyen Sevk: {toplam:,.2f} $*</div>", unsafe_allow_html=True)
-
-    # ---- Yolda Olan (Sevk Edildi) Siparişler [ETA] ----
-    st.markdown("### ⏳ Yolda Olan (ETA Takibi) Siparişler")
-    eta_yolda = df_proforma[
-        (df_proforma["Sevk Durumu"] == "Sevkedildi") & (~df_proforma["Sevk Durumu"].isin(["Ulaşıldı"]))
-    ] if "Sevk Durumu" in df_proforma.columns else pd.DataFrame()
-    try:
-        toplam_eta = pd.to_numeric(eta_yolda["Tutar"], errors="coerce").sum()
-    except Exception:
-        toplam_eta = 0
-    st.markdown(f"<div style='font-size:1.3em; color:#c471f5; font-weight:bold;'>Toplam: {toplam_eta:,.2f} $</div>", unsafe_allow_html=True)
-    if eta_yolda.empty:
-        st.info("Yolda olan (sevk edilmiş) sipariş yok.")
-    else:
-        st.dataframe(
-            eta_yolda[
-                ["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Termin Tarihi", "Açıklama"]
-            ],
-            use_container_width=True
-        )
-
-    # ---- Son Teslim Edilmiş (Ulaşıldı) 5 Sipariş ----
-    st.markdown("### ✅ Son Teslim Edilen (Ulaşıldı) 5 Sipariş")
-    if "Sevk Durumu" in df_proforma.columns:
-        teslim_edilenler = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"]
-        if not teslim_edilenler.empty:
-            teslim_edilenler = teslim_edilenler.sort_values(
-                by="Tarih", ascending=False
-            ).head(5)
-            teslim_edilenler["Termin Tarihi"] = pd.to_datetime(teslim_edilenler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
-            teslim_edilenler["Tarih"] = pd.to_datetime(teslim_edilenler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-            st.dataframe(
-                teslim_edilenler[
-                    ["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Termin Tarihi", "Açıklama"]
-                ],
-                use_container_width=True
-            )
-        else:
-            st.info("Teslim edilmiş sipariş yok.")
-    else:
-        st.info("Teslim edilmiş sipariş yok.")
-
-    # ---- Vade Takibi Tablosu (sadece Boss görebilir) ----
-    if st.session_state.user == "Boss":
-        st.markdown("### 💸 Vadeli Fatura ve Tahsilat Takibi")
-        for col in ["Proforma No", "Vade (gün)", "Ödendi", "Ülke", "Satış Temsilcisi", "Ödeme Şekli"]:
-            if col not in df_evrak.columns:
-                df_evrak[col] = "" if col != "Ödendi" else False
-        df_evrak["Ödendi"] = df_evrak["Ödendi"].fillna(False).astype(bool)
-        vade_df = df_evrak[df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])].copy()
-        if vade_df.empty:
-            st.info("Açık vade kaydı yok.")
-        else:
-            vade_df["Vade Tarihi"] = pd.to_datetime(vade_df["Vade Tarihi"])
-            vade_df["Kalan Gün"] = (vade_df["Vade Tarihi"] - pd.to_datetime(datetime.date.today())).dt.days
-            st.dataframe(
-                vade_df[["Müşteri Adı", "Ülke", "Fatura No", "Vade Tarihi", "Tutar", "Kalan Gün"]],
-                use_container_width=True
-            )
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.info("Daha detaylı işlem yapmak için sol menüden ilgili bölüme geçebilirsiniz.")
-        
-
+# --- Cari Ekleme Menüsü ---
+if menu == "Cari Ekleme":
+    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Yeni Müşteri Ekle</h2>", unsafe_allow_html=True)
+    with st.form("add_customer"):
+        name = st.text_input("Müşteri Adı")
+        phone = st.text_input("Telefon")
+        email = st.text_input("E-posta")
+        address = st.text_area("Adres")
+        ulke = st.selectbox("Ülke", ulke_listesi)
+        temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi)
+        kategori = st.selectbox("Kategori", ["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"])
+        aktif_pasif = st.selectbox("Durum", ["Aktif", "Pasif"])
+        vade_gun = st.number_input("Vade (Gün Sayısı)", min_value=0, max_value=365, value=0, step=1)
+        odeme_sekli = st.selectbox("Ödeme Şekli", ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"])
+        para_birimi = st.selectbox("Para Birimi", ["EURO", "USD", "TL", "RUBLE"])
+        dt_secim = st.selectbox("DT Seçin", ["DT-1", "DT-2", "DT-3", "DT-4"])
+        submitted = st.form_submit_button("Kaydet")
+        if submitted:
+            if name.strip() == "":
+                st.error("Müşteri adı boş olamaz!")
+            else:
+                new_row = {
+                    "Müşteri Adı": name,
+                    "Telefon": phone,
+                    "E-posta": email,
+                    "Adres": address,
+                    "Ülke": ulke,
+                    "Satış Temsilcisi": temsilci,
+                    "Kategori": kategori,
+                    "Durum": aktif_pasif,
+                    "Vade (Gün)": vade_gun,
+                    "Ödeme Şekli": odeme_sekli,
+                    "Para Birimi": para_birimi,
+                    "DT Seçimi": dt_secim
+                }
+                df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
+                df_to_sheet(sheet, SHEET_ID, "Sayfa1", df_musteri)
+                yeni_cari_txt_olustur(new_row)
+                try:
+                    send_email_with_txt(
+                        to_email=["muhasebe@sekeroglugroup.com", "h.boy@sekeroglugroup.com"],
+                        subject="Yeni Cari Açılışı",
+                        body="Muhasebe için yeni cari açılışı ekte gönderilmiştir.",
+                        file_path="yeni_cari.txt"
+                    )
+                    st.success("Müşteri eklendi ve e-posta ile muhasebeye gönderildi!")
+                except Exception as e:
+                    st.warning(f"Müşteri eklendi ama e-posta gönderilemedi: {e}")
+                st.rerun()
