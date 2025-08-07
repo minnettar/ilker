@@ -177,7 +177,7 @@ def read_all_dataframes():
 # ========== DATAFRAME'LERİ YÜKLE ==========
 df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri = read_all_dataframes()
 
-# --- Renkli Menü Butonları için Stil ---
+# --- Renkli Menü CSS ---
 st.sidebar.markdown("""
 <style>
 .menu-btn {
@@ -186,12 +186,14 @@ st.sidebar.markdown("""
     padding: 1em;
     margin-bottom: 10px;
     border: none;
-    border-radius: 10px;
-    font-size: 1.1em;
+    border-radius: 15px;
+    font-size: 1.2em;
     font-weight: bold;
-    color: white;
+    color: white !important;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.18s;
+    text-align: left;
+    border: 2px solid transparent;
 }
 .menu-ozet {background: linear-gradient(90deg, #43cea2, #185a9d);}
 .menu-cari {background: linear-gradient(90deg, #43cea2, #185a9d);}
@@ -203,14 +205,14 @@ st.sidebar.markdown("""
 .menu-evrak {background: linear-gradient(90deg, #f953c6, #b91d73);}
 .menu-vade {background: linear-gradient(90deg, #43e97b, #38f9d7);}
 .menu-eta {background: linear-gradient(90deg, #f857a6, #ff5858);}
-.menu-fuar {background: linear-gradient(90deg, #4e54c8, #8f94fb);}
-.menu-medya {background: linear-gradient(90deg, #4568dc, #b06ab3);}
-.menu-btn:hover {filter: brightness(1.15);}
+.menu-fuar {background: linear-gradient(90deg, #757F9A, #D7DDE8);}
+.menu-medya {background: linear-gradient(90deg, #B993D6, #8CA6DB);}
+.menu-btn:hover, .menu-btn.selected {filter: brightness(1.13); border: 2px solid #fff;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- Menü Listesi ---
-menuler = [
+# --- Menü Tanımları ---
+MENU_OPTIONS = [
     ("Özet Ekran", "menu-ozet", "📊"),
     ("Cari Ekleme", "menu-cari", "🧑‍💼"),
     ("Müşteri Listesi", "menu-musteri", "📒"),
@@ -225,23 +227,87 @@ menuler = [
     ("Medya Çekmecesi", "menu-medya", "🗂️"),
 ]
 
-# Kullanıcıya özel menü (örn: Boss sadece özet ekranı görebilir!)
 if st.session_state.user == "Boss":
-    allowed_menus = [menuler[0]]
+    allowed_menus = [("Özet Ekran", "menu-ozet", "📊")]
 else:
-    allowed_menus = menuler
+    allowed_menus = MENU_OPTIONS
 
-# Menü state'i sakla
-if "menu_state" not in st.session_state or st.session_state.menu_state not in [m[0] for m in allowed_menus]:
+if "menu_state" not in st.session_state:
     st.session_state.menu_state = allowed_menus[0][0]
 
-for i, (isim, renk, ikon) in enumerate(allowed_menus):
-    btn_html = f"""<button class="menu-btn {renk}" style="text-align:left;">{ikon} {isim}</button>"""
-    if st.sidebar.button(f"{ikon} {isim}", key=f"menu_{isim}_{i}"):
-        st.session_state.menu_state = isim
-    st.sidebar.markdown(btn_html, unsafe_allow_html=True)
+# --- Yalnızca RENKLİ KUTULAR OLSUN, Streamlit'in kendi butonu olmadan! ---
+for name, css_class, icon in allowed_menus:
+    selected = "selected" if st.session_state.menu_state == name else ""
+    if st.sidebar.markdown(
+        f"""
+        <button class="menu-btn {css_class} {selected}" onclick="window.location.search='?menu={name}'">
+            {icon} {name}
+        </button>
+        """, unsafe_allow_html=True
+    ):
+        st.session_state.menu_state = name
+
+# --- Menü seçimini almak için, query param'dan çek (HTML butonları için workaround) ---
+import streamlit as st
+from urllib.parse import parse_qs
+
+params = st.experimental_get_query_params()
+if "menu" in params:
+    menu_from_url = params["menu"][0]
+    menu_names = [m[0] for m in allowed_menus]
+    if menu_from_url in menu_names:
+        st.session_state.menu_state = menu_from_url
+        # Temizle ki aynı menü tekrar gelmesin
+        st.experimental_set_query_params()
 
 menu = st.session_state.menu_state
+
+import smtplib
+from email.message import EmailMessage
+
+# Yeni cari için txt dosyasını oluşturma fonksiyonu
+def yeni_cari_txt_olustur(cari_dict, file_path="yeni_cari.txt"):
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(
+            f"Müşteri Adı: {cari_dict['Müşteri Adı']}\n"
+            f"Telefon: {cari_dict['Telefon']}\n"
+            f"E-posta: {cari_dict['E-posta']}\n"
+            f"Adres: {cari_dict['Adres']}\n"
+            f"Ülke: {cari_dict.get('Ülke', '')}\n"
+            f"Satış Temsilcisi: {cari_dict.get('Satış Temsilcisi', '')}\n"
+            f"Kategori: {cari_dict.get('Kategori', '')}\n"
+            f"Durum: {cari_dict.get('Durum', '')}\n"
+            f"Vade (Gün): {cari_dict.get('Vade (Gün)', '')}\n"
+            f"Ödeme Şekli: {cari_dict.get('Ödeme Şekli', '')}\n"
+            f"Para Birimi: {cari_dict.get('Para Birimi', '')}\n"  # Para birimini de ekliyoruz
+            f"DT Seçimi: {cari_dict.get('DT Seçimi', '')}\n"  # DT seçimini de ekliyoruz
+        )
+
+# E-posta göndermek için fonksiyon
+def send_email_with_txt(to_email, subject, body, file_path):
+    from_email = "todo@sekeroglugroup.com"  # Gönderen e-posta adresi
+    password = "vbgvforwwbcpzhxf"  # Gönderen e-posta şifresi
+
+    # E-posta mesajını oluştur
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_email
+    msg["To"] = ", ".join(to_email)  # Birden fazla alıcıyı virgülle ayırarak ekliyoruz
+    msg.set_content(body)
+
+    # TXT dosyasını e-postaya ekle
+    with open(file_path, "rb") as f:
+        msg.add_attachment(
+            f.read(),
+            maintype="text",
+            subtype="plain",
+            filename="yeni_cari.txt"  # Dosyanın ismi
+        )
+
+    # E-posta göndermek için SMTP kullan
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(from_email, password)
+        smtp.send_message(msg)
 
 
 # ==============================
