@@ -15,14 +15,17 @@ import json
 import os
 
 # ========== GOOGLE SHEETS BAĞLANTISI ==========
+
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
+SPREADSHEET_ID = "1oQecN1xnsi9Eir0z3yyGWBcpOUKpg13lT_pAr5zp5AM"  # <-- kendi ID'n!
+
 credentials = Credentials.from_service_account_info(
-    st.secrets["service_account"],   # ANAHTAR ADI ARTIK BU!
+    st.secrets["service_account"],   # secrets.toml içindeki anahtar (dict objesi)
     scopes=SCOPES,
 )
 gc = gspread.authorize(credentials)
