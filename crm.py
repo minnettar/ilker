@@ -177,10 +177,16 @@ def read_all_dataframes():
 # ========== DATAFRAME'LERİ YÜKLE ==========
 df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri = read_all_dataframes()
 
-    if menu == "Özet Ekran":
+# ==============================
+# --- ÖZET EKRAN BAŞLANGIÇ ---
+# ==============================
+
+if menu == "Özet Ekran":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ŞEKEROĞLU İHRACAT CRM - Özet Ekran</h2>", unsafe_allow_html=True)
 
-    # ---- Bekleyen Teklifler Tablosu ----
+    # -------------------------------
+    # --- 1. BEKLEYEN TEKLİFLER ---
+    # -------------------------------
     st.markdown("### 💰 Bekleyen Teklifler")
     bekleyen_teklifler = df_teklif[df_teklif["Durum"] == "Açık"] if "Durum" in df_teklif.columns else pd.DataFrame()
     try:
@@ -196,7 +202,9 @@ df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri 
             use_container_width=True
         )
 
-    # ---- Bekleyen Proformalar Tablosu ----
+    # -----------------------------------
+    # --- 2. BEKLEYEN PROFORMALAR ---
+    # -----------------------------------
     st.markdown("### 📄 Bekleyen Proformalar")
     bekleyen_proformalar = df_proforma[df_proforma["Durum"] == "Beklemede"] if "Durum" in df_proforma.columns else pd.DataFrame()
     try:
@@ -212,7 +220,9 @@ df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri 
             use_container_width=True
         )
 
-    # ---- Siparişe Dönüşen Ama Sevkedilmemiş ve Ulaşıldı Olmayanlar ----
+    # ----------------------------------------------------
+    # --- 3. SEVK BEKLEYEN SİPARİŞLER (SİPARİŞE DÖNEN) ---
+    # ----------------------------------------------------
     st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
     if "Sevk Durumu" not in df_proforma.columns:
         df_proforma["Sevk Durumu"] = ""
@@ -237,7 +247,9 @@ df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri 
             use_container_width=True
         )
 
-    # ---- Yolda Olan (Sevk Edildi) Siparişler [ETA] ----
+    # --------------------------------------------
+    # --- 4. YOLDA OLAN (ETA TAKİBİ) SİPARİŞLER ---
+    # --------------------------------------------
     st.markdown("### ⏳ Yolda Olan (ETA Takibi) Siparişler")
     eta_yolda = df_proforma[
         (df_proforma["Sevk Durumu"] == "Sevkedildi") & (~df_proforma["Sevk Durumu"].isin(["Ulaşıldı"]))
@@ -257,7 +269,9 @@ df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri 
             use_container_width=True
         )
 
-    # ---- Son Teslim Edilmiş (Ulaşıldı) 5 Sipariş ----
+    # ------------------------------------------------------
+    # --- 5. SON TESLİM EDİLEN (ULAŞILDI) 5 SİPARİŞ ---
+    # ------------------------------------------------------
     st.markdown("### ✅ Son Teslim Edilen (Ulaşıldı) 5 Sipariş")
     if "Sevk Durumu" in df_proforma.columns:
         teslim_edilenler = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"]
@@ -276,7 +290,9 @@ df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri 
     else:
         st.info("Teslim edilmiş sipariş yok.")
 
-    # ---- Vade Takibi Tablosu (sadece Boss görebilir) ----
+    # ---------------------------------------------
+    # --- 6. VADE TAKİBİ TABLOSU (BOSS GÖRÜR) ---
+    # ---------------------------------------------
     if st.session_state.user == "Boss":
         st.markdown("### 💸 Vadeli Fatura ve Tahsilat Takibi")
         # Eksikse yeni alanları ekle
@@ -285,7 +301,6 @@ df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri 
                 df_evrak[col] = "" if col != "Ödendi" else False
         df_evrak["Ödendi"] = df_evrak["Ödendi"].fillna(False).astype(bool)
 
-        # Vade tarihi boş olmayan ve ödenmemiş kayıtlar
         vade_df = df_evrak[df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])].copy()
         if vade_df.empty:
             st.info("Açık vade kaydı yok.")
@@ -297,8 +312,13 @@ df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri 
                 use_container_width=True
             )
 
+    # --- Alt bilgi ve yönlendirme ---
     st.markdown("<hr>", unsafe_allow_html=True)
     st.info("Daha detaylı işlem yapmak için sol menüden ilgili bölüme geçebilirsiniz.")
+
+# ==============================
+# --- ÖZET EKRAN SONU ---
+# ==============================
 
 # Cari Ekleme Formu Güncelleme
 if menu == "Cari Ekleme":
