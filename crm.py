@@ -50,9 +50,21 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 
 # === Google Sheets Bağlantısı ===
+import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
+
+# === Google Sheets Bağlantısı ===
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
+
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_file("google_service_account.json", scopes=SCOPES)
+
+# .streamlit/secrets.toml içeriğinden alınan bilgilerle kimlik doğrulama
+creds = Credentials.from_service_account_info(
+    st.secrets["google_service_account"],
+    scopes=SCOPES
+)
+
 client = gspread.authorize(creds)
 sheet = client.open_by_url(SPREADSHEET_URL)
 
