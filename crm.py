@@ -28,8 +28,6 @@ credentials = Credentials.from_service_account_info(
     st.secrets["service_account"],   # secrets.toml içindeki anahtar (dict objesi)
     scopes=SCOPES,
 )
-gc = gspread.authorize(credentials)
-sh = gc.open_by_key(SPREADSHEET_ID)
 
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
