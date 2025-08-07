@@ -20,11 +20,18 @@ from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 import pickle
 
+import streamlit as st
+import pandas as pd
+import os
+import pickle
+from google_auth_oauthlib.flow import Flow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+
 # --- Sabitler ---
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"   # kendi sheet’in
 
-# --- Google OAuth Akışı ---
 def get_credentials():
     creds = None
     # 1. Daha önce login olduysa, token.pickle'dan yükle
@@ -36,10 +43,23 @@ def get_credentials():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # -- client_secret_xxx.json içeriğini Streamlit secrets'tan al --
-            client_config = dict(st.secrets["google_client_secret"])
-            # Cloud’da çalışıyorsan burayı kendi adresinle değiştir!
-            REDIRECT_URI = st.secrets.get("cloud_redirect_uri", "http://localhost:8501")
+            # --- GOOGLE CLIENT CONFIG OLUŞTUR ---
+            secrets = st.secrets["google_client_secret"]
+            # redirect_uris ve javascript_origins json string! Listeye çevir!
+            import json
+            client_config = {
+                "web": {
+                    "client_id": secrets["client_id"],
+                    "project_id": secrets["project_id"],
+                    "auth_uri": secrets["auth_uri"],
+                    "token_uri": secrets["token_uri"],
+                    "auth_provider_x509_cert_url": secrets["auth_provider_x509_cert_url"],
+                    "client_secret": secrets["client_secret"],
+                    "redirect_uris": json.loads(secrets["redirect_uris"]),
+                    "javascript_origins": json.loads(secrets["javascript_origins"]),
+                }
+            }
+            REDIRECT_URI = secrets.get("cloud_redirect_uri", "http://localhost:8501")
             flow = Flow.from_client_config(
                 client_config,
                 SCOPES,
