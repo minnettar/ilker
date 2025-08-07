@@ -177,6 +177,73 @@ def read_all_dataframes():
 # ========== DATAFRAME'LERİ YÜKLE ==========
 df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri = read_all_dataframes()
 
+# --- Renkli Menü Butonları için Stil ---
+st.sidebar.markdown("""
+<style>
+.menu-btn {
+    display: block;
+    width: 100%;
+    padding: 1em;
+    margin-bottom: 10px;
+    border: none;
+    border-radius: 10px;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: white;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.menu-ozet {background: linear-gradient(90deg, #43cea2, #185a9d);}
+.menu-cari {background: linear-gradient(90deg, #43cea2, #185a9d);}
+.menu-musteri {background: linear-gradient(90deg, #ffb347, #ffcc33);}
+.menu-gorusme {background: linear-gradient(90deg, #ff5e62, #ff9966);}
+.menu-teklif {background: linear-gradient(90deg, #8e54e9, #4776e6);}
+.menu-proforma {background: linear-gradient(90deg, #11998e, #38ef7d);}
+.menu-siparis {background: linear-gradient(90deg, #f7971e, #ffd200);}
+.menu-evrak {background: linear-gradient(90deg, #f953c6, #b91d73);}
+.menu-vade {background: linear-gradient(90deg, #43e97b, #38f9d7);}
+.menu-eta {background: linear-gradient(90deg, #f857a6, #ff5858);}
+.menu-fuar {background: linear-gradient(90deg, #4e54c8, #8f94fb);}
+.menu-medya {background: linear-gradient(90deg, #4568dc, #b06ab3);}
+.menu-btn:hover {filter: brightness(1.15);}
+</style>
+""", unsafe_allow_html=True)
+
+# --- Menü Listesi ---
+menuler = [
+    ("Özet Ekran", "menu-ozet", "📊"),
+    ("Cari Ekleme", "menu-cari", "🧑‍💼"),
+    ("Müşteri Listesi", "menu-musteri", "📒"),
+    ("Görüşme / Arama / Ziyaret Kayıtları", "menu-gorusme", "☎️"),
+    ("Fiyat Teklifleri", "menu-teklif", "💰"),
+    ("Proforma Takibi", "menu-proforma", "📄"),
+    ("Güncel Sipariş Durumu", "menu-siparis", "🚚"),
+    ("Fatura & İhracat Evrakları", "menu-evrak", "📑"),
+    ("Vade Takibi", "menu-vade", "⏰"),
+    ("ETA Takibi", "menu-eta", "🛳️"),
+    ("Fuar Müşteri Kayıtları", "menu-fuar", "🎫"),
+    ("Medya Çekmecesi", "menu-medya", "🗂️"),
+]
+
+# Kullanıcıya özel menü (örn: Boss sadece özet ekranı görebilir!)
+if st.session_state.user == "Boss":
+    allowed_menus = [menuler[0]]
+else:
+    allowed_menus = menuler
+
+# Menü state'i sakla
+if "menu_state" not in st.session_state or st.session_state.menu_state not in [m[0] for m in allowed_menus]:
+    st.session_state.menu_state = allowed_menus[0][0]
+
+for i, (isim, renk, ikon) in enumerate(allowed_menus):
+    btn_html = f"""<button class="menu-btn {renk}" style="text-align:left;">{ikon} {isim}</button>"""
+    if st.sidebar.button(f"{ikon} {isim}", key=f"menu_{isim}_{i}"):
+        st.session_state.menu_state = isim
+    st.sidebar.markdown(btn_html, unsafe_allow_html=True)
+
+menu = st.session_state.menu_state
+
+
 # ==============================
 # --- ÖZET EKRAN BAŞLANGIÇ ---
 # ==============================
