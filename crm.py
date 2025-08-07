@@ -10,6 +10,10 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
 
+import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
+
 # --- Google Sheets Ayarları ---
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
@@ -24,6 +28,7 @@ credentials = Credentials.from_service_account_info(
     scopes=SCOPES,
 )
 gc = gspread.authorize(credentials)
+sh = gc.open_by_key(sheet_id)
 
 
 # ========== KULLANICI GİRİŞİ ==========
