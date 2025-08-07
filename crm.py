@@ -9,6 +9,13 @@ from google.oauth2.service_account import Credentials
 from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
+import uuid
+import glob
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+from fpdf import FPDF
+import tempfile
 
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
