@@ -177,7 +177,7 @@ def read_all_dataframes():
 # ========== DATAFRAME'LERİ YÜKLE ==========
 df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri = read_all_dataframes()
 
-if menu == "Özet Ekran":
+elif menu == "Özet Ekran":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ŞEKEROĞLU İHRACAT CRM - Özet Ekran</h2>", unsafe_allow_html=True)
 
     # ---- Bekleyen Teklifler Tablosu ----
