@@ -262,3 +262,167 @@ for i, (isim, renk, ikon) in enumerate(allowed_menus):
 
 menu = st.session_state.menu_state
 
+def yeni_cari_txt_olustur(cari_dict):
+    txt_content = (
+        f"Müşteri Adı: {cari_dict['Müşteri Adı']}\n"
+        f"Telefon: {cari_dict['Telefon']}\n"
+        f"E-posta: {cari_dict['E-posta']}\n"
+        f"Adres: {cari_dict['Adres']}\n"
+        f"Ülke: {cari_dict.get('Ülke', '')}\n"
+        f"Satış Temsilcisi: {cari_dict.get('Satış Temsilcisi', '')}\n"
+        f"Kategori: {cari_dict.get('Kategori', '')}\n"
+        f"Durum: {cari_dict.get('Durum', '')}\n"
+        f"Vade (Gün): {cari_dict.get('Vade (Gün)', '')}\n"
+        f"Ödeme Şekli: {cari_dict.get('Ödeme Şekli', '')}\n"
+        f"Para Birimi: {cari_dict.get('Para Birimi', '')}\n"
+        f"DT Seçimi: {cari_dict.get('DT Seçimi', '')}\n"
+    )
+    # Geçici dosya ile bulutta güvenli kaydet
+    temp = tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".txt", encoding="utf-8")
+    temp.write(txt_content)
+    temp.flush()
+    return temp.name  # Dosya yolunu döndür
+
+def send_email_with_txt(to_email, subject, body, file_path):
+    from_email = "todo@sekeroglugroup.com"
+    password = st.secrets["MAIL_PASSWORD"]  # Şifreyi secrets.toml'a taşı!
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_email
+    msg["To"] = ", ".join(to_email)
+    msg.set_content(body)
+    with open(file_path, "rb") as f:
+        msg.add_attachment(
+            f.read(),
+            maintype="text",
+            subtype="plain",
+            filename="yeni_cari.txt"
+        )
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(from_email, password)
+        smtp.send_message(msg)
+
+if menu == "Özet Ekran":
+    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ŞEKEROĞLU İHRACAT CRM - Özet Ekran</h2>", unsafe_allow_html=True)
+
+    # ---- Bekleyen Teklifler Tablosu ----
+    st.markdown("### 💰 Bekleyen Teklifler")
+    bekleyen_teklifler = df_teklif[df_teklif["Durum"] == "Açık"] if "Durum" in df_teklif.columns else pd.DataFrame()
+    try:
+        toplam_teklif = pd.to_numeric(bekleyen_teklifler["Tutar"], errors="coerce").sum()
+    except Exception:
+        toplam_teklif = 0
+    st.markdown(f"<div style='font-size:1.3em; color:#11998e; font-weight:bold;'>Toplam: {toplam_teklif:,.2f} $</div>", unsafe_allow_html=True)
+    if bekleyen_teklifler.empty:
+        st.info("Bekleyen teklif yok.")
+    else:
+        st.dataframe(
+            bekleyen_teklifler[["Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama"]],
+            use_container_width=True
+        )
+
+    # ---- Bekleyen Proformalar Tablosu ----
+    st.markdown("### 📄 Bekleyen Proformalar")
+    bekleyen_proformalar = df_proforma[df_proforma["Durum"] == "Beklemede"] if "Durum" in df_proforma.columns else pd.DataFrame()
+    try:
+        toplam_proforma = pd.to_numeric(bekleyen_proformalar["Tutar"], errors="coerce").sum()
+    except Exception:
+        toplam_proforma = 0
+    st.markdown(f"<div style='font-size:1.3em; color:#f7971e; font-weight:bold;'>Toplam: {toplam_proforma:,.2f} $</div>", unsafe_allow_html=True)
+    if bekleyen_proformalar.empty:
+        st.info("Bekleyen proforma yok.")
+    else:
+        st.dataframe(
+            bekleyen_proformalar[["Müşteri Adı", "Proforma No", "Tarih", "Tutar", "Açıklama"]],
+            use_container_width=True
+        )
+
+    # ---- Siparişe Dönüşen (Sevk Bekleyen) Tablosu (Termin Tarihine Göre) ----
+    st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
+    for col in ["Sevk Durumu", "Termin Tarihi", "Satış Temsilcisi", "Ödeme Şekli", "Ülke"]:
+        if col not in df_proforma.columns:
+            df_proforma[col] = ""
+    siparisler = df_proforma[
+        (df_proforma["Durum"] == "Siparişe Dönüştü") &
+        (~df_proforma["Sevk Durumu"].isin(["Sevkedildi", "Ulaşıldı"]))
+    ].copy()
+    siparisler["Termin Tarihi Order"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce")
+    siparisler = siparisler.sort_values("Termin Tarihi Order", ascending=True)
+    if siparisler.empty:
+        st.info("Henüz sevk edilmeyi bekleyen sipariş yok.")
+    else:
+        siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+        siparisler["Termin Tarihi"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+        tablo = siparisler[
+            ["Tarih", "Müşteri Adı", "Termin Tarihi", "Ülke", "Satış Temsilcisi", "Ödeme Şekli", "Proforma No", "Tutar", "Açıklama"]
+        ]
+        st.dataframe(tablo, use_container_width=True)
+        try:
+            toplam = pd.to_numeric(siparisler["Tutar"], errors="coerce").sum()
+        except Exception:
+            toplam = 0
+        st.markdown(f"<div style='color:#219A41; font-weight:bold;'>*Toplam Bekleyen Sevk: {toplam:,.2f} $*</div>", unsafe_allow_html=True)
+
+    # ---- Yolda Olan (Sevk Edildi) Siparişler [ETA] ----
+    st.markdown("### ⏳ Yolda Olan (ETA Takibi) Siparişler")
+    eta_yolda = df_proforma[
+        (df_proforma["Sevk Durumu"] == "Sevkedildi") & (~df_proforma["Sevk Durumu"].isin(["Ulaşıldı"]))
+    ] if "Sevk Durumu" in df_proforma.columns else pd.DataFrame()
+    try:
+        toplam_eta = pd.to_numeric(eta_yolda["Tutar"], errors="coerce").sum()
+    except Exception:
+        toplam_eta = 0
+    st.markdown(f"<div style='font-size:1.3em; color:#c471f5; font-weight:bold;'>Toplam: {toplam_eta:,.2f} $</div>", unsafe_allow_html=True)
+    if eta_yolda.empty:
+        st.info("Yolda olan (sevk edilmiş) sipariş yok.")
+    else:
+        st.dataframe(
+            eta_yolda[
+                ["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Termin Tarihi", "Açıklama"]
+            ],
+            use_container_width=True
+        )
+
+    # ---- Son Teslim Edilmiş (Ulaşıldı) 5 Sipariş ----
+    st.markdown("### ✅ Son Teslim Edilen (Ulaşıldı) 5 Sipariş")
+    if "Sevk Durumu" in df_proforma.columns:
+        teslim_edilenler = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"]
+        if not teslim_edilenler.empty:
+            teslim_edilenler = teslim_edilenler.sort_values(
+                by="Tarih", ascending=False
+            ).head(5)
+            teslim_edilenler["Termin Tarihi"] = pd.to_datetime(teslim_edilenler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+            teslim_edilenler["Tarih"] = pd.to_datetime(teslim_edilenler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+            st.dataframe(
+                teslim_edilenler[
+                    ["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Termin Tarihi", "Açıklama"]
+                ],
+                use_container_width=True
+            )
+        else:
+            st.info("Teslim edilmiş sipariş yok.")
+    else:
+        st.info("Teslim edilmiş sipariş yok.")
+
+    # ---- Vade Takibi Tablosu (sadece Boss görebilir) ----
+    if st.session_state.user == "Boss":
+        st.markdown("### 💸 Vadeli Fatura ve Tahsilat Takibi")
+        for col in ["Proforma No", "Vade (gün)", "Ödendi", "Ülke", "Satış Temsilcisi", "Ödeme Şekli"]:
+            if col not in df_evrak.columns:
+                df_evrak[col] = "" if col != "Ödendi" else False
+        df_evrak["Ödendi"] = df_evrak["Ödendi"].fillna(False).astype(bool)
+        vade_df = df_evrak[df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])].copy()
+        if vade_df.empty:
+            st.info("Açık vade kaydı yok.")
+        else:
+            vade_df["Vade Tarihi"] = pd.to_datetime(vade_df["Vade Tarihi"])
+            vade_df["Kalan Gün"] = (vade_df["Vade Tarihi"] - pd.to_datetime(datetime.date.today())).dt.days
+            st.dataframe(
+                vade_df[["Müşteri Adı", "Ülke", "Fatura No", "Vade Tarihi", "Tutar", "Kalan Gün"]],
+                use_container_width=True
+            )
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.info("Daha detaylı işlem yapmak için sol menüden ilgili bölüme geçebilirsiniz.")
+        
+
