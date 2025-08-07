@@ -1,9 +1,5 @@
 import streamlit as st
 import pandas as pd
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-import io
-import os
 import datetime
 import smtplib
 from email.message import EmailMessage
@@ -14,19 +10,23 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
 
+# -- Google Sheets için ayarlar --
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
+# -- !!! LÜTFEN BURADA SADECE Sheet ID'nizi DEĞİŞTİRİN !!! --
+SPREADSHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"  # <-- Sadece bu satır değişecek
+
+# -- Streamlit Cloud'da .toml'a eklenen "secrets" ile credential'ı çekiyoruz --
 credentials = Credentials.from_service_account_info(
-    st.secrets,  # Cloud'da secrets'tan direkt okur
+    st.secrets["service_account"],   # secrets.toml içinde anahtar "service_account" olarak olmalı!
     scopes=SCOPES,
 )
-
 gc = gspread.authorize(credentials)
-
+sh = gc.open_by_key(SPREADSHEET_ID)
 
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
