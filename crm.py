@@ -72,9 +72,9 @@ def load_sheet_as_df(sheet_name, columns):
                 df[col] = ""
         return df
     except Exception as e:
-        print(f"Hata oluştu ({sheet_name}):", e)
+        print(f"{sheet_name} sayfası yüklenirken hata oluştu:", e)
         return pd.DataFrame(columns=columns)
-
+        
 # === Tüm Sayfaları DataFrame olarak Yükle ===
 df_musteri = load_sheet_as_df("Sayfa1", [
     "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke",
