@@ -66,12 +66,13 @@ def load_sheet_as_df(sheet_name, columns):
         worksheet = sheet.worksheet(sheet_name)
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
-        # Eksik sütun varsa ekleyelim
+        # Eksik sütun varsa ekle
         for col in columns:
             if col not in df.columns:
                 df[col] = ""
         return df
-    except Exception:
+    except Exception as e:
+        print(f"Hata oluştu ({sheet_name}):", e)
         return pd.DataFrame(columns=columns)
 
 # === Tüm Sayfaları DataFrame olarak Yükle ===
