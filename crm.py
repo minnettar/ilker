@@ -8,18 +8,20 @@ import smtplib
 from email.message import EmailMessage
 import io
 
-# --- Google Sheets Ayarları ---
-SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"  # Sheet ID'ni kendi sheet'inle değiştir
+ --- Google Sheets Ayarları ---
+SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
+
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+# Cloud'da service_account bilgileri secrets.toml'dan okunur:
 creds = service_account.Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
     scopes=SCOPES
 )
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-creds = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE,
-    scopes=SCOPES
-)
 service = build('sheets', 'v4', credentials=creds)
 sheet = service.spreadsheets()
 
