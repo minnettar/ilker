@@ -45,33 +45,38 @@ if st.sidebar.button("🚪 Çıkış Yap"):
     st.session_state.user = None
     st.rerun()
 
-
-# === Google Sheets Bağlantısı ===
-
+# === Google Sheets API scope ===
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-try:
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=SCOPES
-    )
 
-    service = build("sheets", "v4", credentials=creds)
-    sheet = service.spreadsheets()
+# === Servis hesabı bilgilerini streamlit secrets'tan çekiyoruz ===
+creds = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=SCOPES
+)
 
-    SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
+# === Sheets servisini başlat ===
+service = build("sheets", "v4", credentials=creds)
+sheet = service.spreadsheets()
+
+# === Google Sheet dosyanızın ID'si ===
+SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
 # === Yardımcı Fonksiyon ===
 def load_sheet_as_df(sheet_name, columns):
     try:
-        worksheet = sheet.worksheet(sheet_name)
-        data = worksheet.get_all_records()
-        df = pd.DataFrame(data)
-        # Eksik sütun varsa ekle
+        worksheet = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_name).execute()
+        values = worksheet.get("values", [])
+        if not values:
+            return pd.DataFrame(columns=columns)
+        
+        df = pd.DataFrame(values[1:], columns=values[0])
+        
+        # Eksik sütunları ekle
         for col in columns:
             if col not in df.columns:
                 df[col] = ""
         return df
-except Exception as e:
+    except Exception as e:
         print(f"{sheet_name} sayfası yüklenirken hata oluştu:", e)
         return pd.DataFrame(columns=columns)
         
