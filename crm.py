@@ -177,26 +177,6 @@ def read_all_dataframes():
 # ========== DATAFRAME'LERİ YÜKLE ==========
 df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri = read_all_dataframes()
 
-# Menüler tanımı
-menuler = [
-    ("Özet Ekran", "menu-ozet", "📊"),
-    ("Cari Ekleme", "menu-cari", "🧑‍💼"),
-    ("Müşteri Listesi", "menu-musteri", "📒"),
-    ("Görüşme / Arama / Ziyaret Kayıtları", "menu-gorusme", "☎️"),
-    ("Fiyat Teklifleri", "menu-teklif", "💰"),
-    ("Proforma Takibi", "menu-proforma", "📄"),
-    ("Güncel Sipariş Durumu", "menu-siparis", "🚚"),
-    ("Fatura & İhracat Evrakları", "menu-evrak", "📑"),
-    ("Vade Takibi", "menu-vade", "⏰"),
-    ("ETA Takibi", "menu-eta", "🛳️"),
-    ("Fuar Müşteri Kayıtları", "menu-fuar", "🎫"),
-    ("Medya Çekmecesi", "menu-medya", "🗂️"),
-]
-
-# İlk açılışta seçili menü (veya bir önceki seçim)
-if "menu_state" not in st.session_state:
-    st.session_state.menu_state = menuler[0][0]
-
 st.sidebar.markdown("""
 <style>
 .menu-btn {
@@ -212,9 +192,8 @@ st.sidebar.markdown("""
     cursor: pointer;
     transition: background 0.2s;
 }
-.menu-ozet {background: linear-gradient(90deg, #43cea2, #185a9d);}
-.menu-cari {background: linear-gradient(90deg, #ffb347, #ffcc33);}
-.menu-musteri {background: linear-gradient(90deg, #8e54e9, #4776e6);}
+.menu-cari {background: linear-gradient(90deg, #43cea2, #185a9d);}
+.menu-musteri {background: linear-gradient(90deg, #ffb347, #ffcc33);}
 .menu-gorusme {background: linear-gradient(90deg, #ff5e62, #ff9966);}
 .menu-teklif {background: linear-gradient(90deg, #8e54e9, #4776e6);}
 .menu-proforma {background: linear-gradient(90deg, #11998e, #38ef7d);}
@@ -222,27 +201,41 @@ st.sidebar.markdown("""
 .menu-evrak {background: linear-gradient(90deg, #f953c6, #b91d73);}
 .menu-vade {background: linear-gradient(90deg, #43e97b, #38f9d7);}
 .menu-eta {background: linear-gradient(90deg, #f857a6, #ff5858);}
-.menu-fuar {background: linear-gradient(90deg, #434343, #a4b0be);}
-.menu-medya {background: linear-gradient(90deg, #a770ef, #cf8bf3);}
 .menu-btn:hover {filter: brightness(1.2);}
 </style>
 """, unsafe_allow_html=True)
 
-for isim, renk, ikon in menuler:
-    buton_html = f"""
-    <button class="menu-btn {renk}" onclick="window.location.search='?menu={isim}'">
-        {ikon} {isim}
-    </button>
-    """
-    st.sidebar.markdown(buton_html, unsafe_allow_html=True)
+# --- Menü Butonları (kullanıcıya göre) ---
+menuler = [
+    ("Özet Ekran", "menu-ozet", "📊"),
+    ("Cari Ekleme", "menu-cari", "🧑‍💼"),
+    ("Müşteri Listesi", "menu-musteri", "📒"),
+    ("Görüşme / Arama / Ziyaret Kayıtları", "menu-gorusme", "☎️"),
+    ("Fiyat Teklifleri", "menu-teklif", "💰"),
+    ("Proforma Takibi", "menu-proforma", "📄"),
+    ("Güncel Sipariş Durumu", "menu-siparis", "🚚"),
+    ("Fatura & İhracat Evrakları", "menu-evrak", "📑"),
+    ("Vade Takibi", "menu-vade", "⏰"),
+    ("ETA Takibi", "menu-eta", "🛳️"),
+    ("Fuar Müşteri Kayıtları", "menu-fuar", "🎫"),
+    ("Medya Çekmecesi", "menu-medya", "🗂️"),
+]
 
-# Query param ile seçim (Streamlit 1.34+ için güvenli yöntem)
-import urllib.parse
-params = st.query_params
-if "menu" in params and params["menu"][0] in [m[0] for m in menuler]:
-    st.session_state.menu_state = params["menu"][0]
+# Kullanıcıya özel menü
+if st.session_state.user == "Boss":
+    allowed_menus = [("Özet Ekran", "menu-ozet", "📊")]
+else:
+    allowed_menus = menuler
+
+if "menu_state" not in st.session_state or st.session_state.menu_state not in [m[0] for m in allowed_menus]:
+    st.session_state.menu_state = allowed_menus[0][0]
+
+for i, (isim, renk, ikon) in enumerate(allowed_menus):
+    if st.sidebar.button(f"{ikon} {isim}", key=f"menu_{isim}_{i}", help=isim):
+        st.session_state.menu_state = isim
 
 menu = st.session_state.menu_state
+
 
 import smtplib
 from email.message import EmailMessage
@@ -290,7 +283,6 @@ def send_email_with_txt(to_email, subject, body, file_path):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(from_email, password)
         smtp.send_message(msg)
-
 
 # ==============================
 # --- ÖZET EKRAN BAŞLANGIÇ ---
