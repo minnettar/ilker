@@ -10,15 +10,6 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
 
-# --- Google Sheets Ayarları ---
-SCOPES = [
-    "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-sheet_id = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
-
-
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
     "export1": "Seker12345!",
