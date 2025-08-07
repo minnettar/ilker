@@ -21,12 +21,14 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
+SPREADSHEET_ID = "1oQecN1xnsi9Eir0z3yyGWBcpOUKpg13lT_pAr5zp5AM"  # <-- kendi ID'n!
+
 credentials = Credentials.from_service_account_info(
-    st.secrets,  # Streamlit Cloud'da .streamlit/secrets.toml ile kullanılır
+    st.secrets["gcp_service_account"],   # secrets.toml içindeki anahtar (dict objesi)
     scopes=SCOPES,
 )
 gc = gspread.authorize(credentials)
-sh = gc.open("CRM")  # Google Sheets dosya adı: CRM (uzantı yok)
+sh = gc.open_by_key(SPREADSHEET_ID)
 
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
