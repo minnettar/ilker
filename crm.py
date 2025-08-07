@@ -18,7 +18,7 @@ sheet = service.spreadsheets()
 
 # Test: Google Sheet'e bağlanabiliyor muyuz?
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"  # kendi sheet ID'n ile değiştir
-RANGE = "Müşteri!A1:D5"  # örnek aralık
+RANGE = "Sayfa1!A1:D5"  # örnek aralık
 
 try:
     result = sheet.values().get(spreadsheetId=SHEET_ID, range=RANGE).execute()
