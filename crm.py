@@ -1,29 +1,35 @@
 import streamlit as st
 import pandas as pd
+import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# Gerekli scope
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+# Servis hesabını .json dosyasından yükle
+with open("ilkercrm-51-service-account.json") as source:
+    info = json.load(source)
 
-# Kimlik doğrulama: Streamlit secrets üzerinden
-creds = service_account.Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],
-    scopes=SCOPES
-)
+creds = service_account.Credentials.from_service_account_info(info, scopes=[
+    "https://www.googleapis.com/auth/spreadsheets.readonly"
+])
 
-# Google Sheets servis nesnesi oluştur
-service = build('sheets', 'v4', credentials=creds)
+# Google Sheets servisini başlat
+service = build("sheets", "v4", credentials=creds)
 sheet = service.spreadsheets()
 
-# Test: Google Sheet'e bağlanabiliyor muyuz?
-SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"  # kendi sheet ID'n ile değiştir
-RANGE = "Müşteri!A1:D5"  # örnek aralık
+# Google Sheets ID ve aralık
+SPREADSHEET_ID = "1IF6CN4oHEMk6IEE40ZGixPkfnNHLYXnQ"
+RANGE_NAME = "A1:K10"  # İlk 10 satırı getir
 
 try:
-    result = sheet.values().get(spreadsheetId=SHEET_ID, range=RANGE).execute()
-    values = result.get('values', [])
-    st.success("✅ Google Sheet bağlantısı başarılı.")
-    st.write(values)
+    result = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME).execute()
+    values = result.get("values", [])
+
+    if not values:
+        st.error("❌ Tablo boş görünüyor.")
+    else:
+        df = pd.DataFrame(values[1:], columns=values[0]) if len(values) > 1 else pd.DataFrame(values)
+        st.success("✅ Google Sheets bağlantısı başarılı.")
+        st.dataframe(df)
+
 except Exception as e:
-    st.error(f"❌ Google Sheet bağlantısı başarısız: {e}")
+    st.error(f"❌ Bağlantı kurulamadı: {e}")
