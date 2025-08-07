@@ -4,6 +4,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 from googleapiclient.discovery import build
+import os
+import smtplib
+from email.message import EmailMessage
+import numpy as np
 
 # === Streamlit Ayarları ===
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
