@@ -4,10 +4,6 @@ import json
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# Servis hesabını .json dosyasından yükle
-with open("ilkercrm-51-service-account.json") as source:
-    info = json.load(source)
-
 creds = service_account.Credentials.from_service_account_info(info, scopes=[
     "https://www.googleapis.com/auth/spreadsheets.readonly"
 ])
