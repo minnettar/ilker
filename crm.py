@@ -110,12 +110,6 @@ with col2:
         </div>
     """, unsafe_allow_html=True)
 
-# --- Google Sheets ile bağlantı ---
-SERVICE_ACCOUNT_FILE = 'service_account.json'
-SPREADSHEET_ID = "1oQecN1xnsi9Eir0z3yyGWBcpOUKpg13lT_pAr5zp5AM"
-
-gc = gspread.service_account(filename=SERVICE_ACCOUNT_FILE)
-sh = gc.open_by_key(SPREADSHEET_ID)
 
 # --- DataFrame'leri Google Sheets'ten Okuma ---
 def read_all_dataframes():
