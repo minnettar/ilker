@@ -10,8 +10,10 @@ import io
 
 # --- Google Sheets Ayarları ---
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"  # Sheet ID'ni kendi sheet'inle değiştir
-SERVICE_ACCOUNT_FILE = "ilkercrm-81081623bf14.json"  # Service account json dosya adı (cloud'da secrets üzerinden okunacaksa ayarla)
-
+creds = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=SCOPES
+)
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 creds = service_account.Credentials.from_service_account_file(
