@@ -24,7 +24,7 @@ credentials = Credentials.from_service_account_info(
     scopes=SCOPES,
 )
 gc = gspread.authorize(credentials)
-sh = gc.open_by_key(SPREADSHEET_ID)
+
 
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
