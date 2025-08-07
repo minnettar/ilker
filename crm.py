@@ -8,8 +8,7 @@ import smtplib
 from email.message import EmailMessage
 import io
 
- --- Google Sheets Ayarları ---
-
+ # --- Google Sheets Ayarları ---
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
 SCOPES = [
