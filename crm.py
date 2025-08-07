@@ -297,16 +297,34 @@ if menu == "Cari Ekleme":
                     st.warning(f"Müşteri eklendi ama e-posta gönderilemedi: {e}")
                 st.rerun()
 
+# ===========================
+# === MÜŞTERİ LİSTESİ MENÜSÜ ===
+# ===========================
+
 import numpy as np  # Eksik bilgi mesajı için gerekli
 
-# Gerekli sütunlar eksikse oluştur
-for col in ["Vade (Gün)", "Ülke", "Satış Temsilcisi", "Ödeme Şekli"]:
-    if col not in df_musteri.columns:
-        df_musteri[col] = ""
+# df_musteri'yi session_state'te sakla
+if "df_musteri" not in st.session_state:
+    st.session_state.df_musteri = pd.DataFrame(columns=[
+        "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke", "Satış Temsilcisi",
+        "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli", "Para Birimi", "DT Seçimi"
+    ])
+
+df_musteri = st.session_state.df_musteri
+
+if "Vade (Gün)" not in df_musteri.columns:
+    df_musteri["Vade (Gün)"] = ""
+if "Ülke" not in df_musteri.columns:
+    df_musteri["Ülke"] = ""
+if "Satış Temsilcisi" not in df_musteri.columns:
+    df_musteri["Satış Temsilcisi"] = ""
+if "Ödeme Şekli" not in df_musteri.columns:
+    df_musteri["Ödeme Şekli"] = ""
 
 if menu == "Müşteri Listesi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Müşteri Listesi</h2>", unsafe_allow_html=True)
 
+    # Sadece Aktif müşterileri göster
     if not df_musteri.empty:
         aktif_df = df_musteri[df_musteri["Durum"] == "Aktif"].sort_values("Müşteri Adı").reset_index(drop=True)
         aktif_df = aktif_df.replace({np.nan: "Eksik bilgi, lütfen tamamlayın", "": "Eksik bilgi, lütfen tamamlayın"})
@@ -323,22 +341,20 @@ if menu == "Müşteri Listesi":
             options=musteri_options,
             format_func=lambda i: f"{df_musteri_sorted.at[i,'Müşteri Adı']} ({df_musteri_sorted.at[i,'Kategori']})"
         )
-
         with st.form("edit_existing_customer"):
             name = st.text_input("Müşteri Adı", value=df_musteri_sorted.at[sec_index, "Müşteri Adı"])
             phone = st.text_input("Telefon", value=df_musteri_sorted.at[sec_index, "Telefon"])
             email = st.text_input("E-posta", value=df_musteri_sorted.at[sec_index, "E-posta"])
             address = st.text_area("Adres", value=df_musteri_sorted.at[sec_index, "Adres"])
-            ulke = st.selectbox("Ülke", ulke_listesi, index=ulke_listesi.index(df_musteri_sorted.at[sec_index, "Ülke"]) if df_musteri_sorted.at[sec_index, "Ülke"] in ulke_listesi else 0)
+            ulke = st.selectbox("Ulke", ulke_listesi, index=ulke_listesi.index(df_musteri_sorted.at[sec_index, "Ülke"]) if df_musteri_sorted.at[sec_index, "Ülke"] in ulke_listesi else 0)
             temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi, index=temsilci_listesi.index(df_musteri_sorted.at[sec_index, "Satış Temsilcisi"]) if df_musteri_sorted.at[sec_index, "Satış Temsilcisi"] in temsilci_listesi else 0)
-            kategori = st.selectbox("Kategori", sorted(["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"]), index=0)
+            kategori = st.selectbox("Kategori", sorted(["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"]), index=sorted(["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"]).index(df_musteri_sorted.at[sec_index, "Kategori"]) if df_musteri_sorted.at[sec_index, "Kategori"] in ["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"] else 0)
             aktif_pasif = st.selectbox("Durum", ["Aktif", "Pasif"], index=0 if df_musteri_sorted.at[sec_index, "Durum"] == "Aktif" else 1)
-            vade = st.text_input("Vade (Gün)", value=str(df_musteri_sorted.at[sec_index, "Vade (Gün)"]))
-            odeme_sekli = st.selectbox("Ödeme Şekli", ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"], index=0)
-
+            vade = st.text_input("Vade (Gün)", value=str(df_musteri_sorted.at[sec_index, "Vade (Gün)"]) if "Vade (Gün)" in df_musteri_sorted.columns else "")
+            odeme_sekli = st.selectbox("Ödeme Şekli", ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"], index=["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"].index(df_musteri_sorted.at[sec_index, "Ödeme Şekli"]) if df_musteri_sorted.at[sec_index, "Ödeme Şekli"] in ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"] else 0)
             guncelle = st.form_submit_button("Güncelle")
+
             if guncelle:
-                global df_musteri
                 filtre = (df_musteri["Müşteri Adı"] == df_musteri_sorted.at[sec_index, "Müşteri Adı"])
                 if filtre.any():
                     orj_idx = df_musteri[filtre].index[0]
@@ -352,21 +368,22 @@ if menu == "Müşteri Listesi":
                     df_musteri.at[orj_idx, "Durum"] = aktif_pasif
                     df_musteri.at[orj_idx, "Vade (Gün)"] = vade
                     df_musteri.at[orj_idx, "Ödeme Şekli"] = odeme_sekli
+                    st.session_state.df_musteri = df_musteri
                     update_excel()
                     st.success("Müşteri bilgisi güncellendi!")
                     st.rerun()
                 else:
                     st.warning("Beklenmeyen hata: Kayıt bulunamadı.")
 
-        # Silme bölümü
+        # Silme butonu
         st.markdown("<h4 style='margin-top: 32px;'>Müşteri Sil</h4>", unsafe_allow_html=True)
         sil_btn = st.button("Seçili Müşteriyi Sil")
         if sil_btn:
-            global df_musteri
             filtre = (df_musteri["Müşteri Adı"] == df_musteri_sorted.at[sec_index, "Müşteri Adı"])
             if filtre.any():
                 orj_idx = df_musteri[filtre].index[0]
                 df_musteri = df_musteri.drop(orj_idx).reset_index(drop=True)
+                st.session_state.df_musteri = df_musteri
                 update_excel()
                 st.success("Müşteri kaydı silindi!")
                 st.rerun()
@@ -374,3 +391,5 @@ if menu == "Müşteri Listesi":
                 st.warning("Beklenmeyen hata: Silinecek kayıt bulunamadı.")
     else:
         st.markdown("<div style='color:#b00020; font-weight:bold; font-size:1.2em;'>Henüz müşteri kaydı yok.</div>", unsafe_allow_html=True)
+
+
