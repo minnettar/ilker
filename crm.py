@@ -8,22 +8,34 @@ import smtplib
 from email.message import EmailMessage
 import io
 
- # --- Google Sheets Ayarları ---
-SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
-
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-
-# Cloud'da service_account bilgileri secrets.toml'dan okunur:
+# --- Google Sheets Ayarları ---
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"  # Kendi sheet ID'nizi kullanın
 creds = service_account.Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
     scopes=SCOPES
 )
-
 service = build('sheets', 'v4', credentials=creds)
 sheet = service.spreadsheets()
+
+# --- Sheet'ten müşteri verilerini oku ---
+def read_musteri_sheet():
+    try:
+        sheet_range = "Müşteriler!A1:L"  # İlk satır başlık
+        result = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_range).execute()
+        values = result.get("values", [])
+        if not values:
+            return pd.DataFrame(columns=[
+                "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke", "Satış Temsilcisi",
+                "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli", "Para Birimi", "DT Seçimi"
+            ])
+        else:
+            df = pd.DataFrame(values[1:], columns=values[0])
+            return df
+    except Exception as e:
+        st.error(f"Sheet okuma hatası: {e}")
+        return pd.DataFrame()
+
 
 # --- Fonksiyonlar (Google Sheet'le okuma/yazma) ---
 def sheet_to_df(sheet, sheet_id, sheet_name):
