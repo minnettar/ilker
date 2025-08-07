@@ -19,7 +19,6 @@ import tempfile
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 import pickle
-import os
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
 CLIENT_SECRET_FILE = "client_secret_370619069251-kl99fgfn1noumguvm5gej1gn257jiaku.apps.googleusercontent.com.json"
