@@ -3,6 +3,7 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+from googleapiclient.discovery import build
 
 # === Streamlit Ayarları ===
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
@@ -45,20 +46,17 @@ if st.sidebar.button("🚪 Çıkış Yap"):
     st.session_state.user = None
     st.rerun()
 
-# === Google Sheets API scope ===
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+from google.oauth2 import service_account
 
-# === Servis hesabı bilgilerini streamlit secrets'tan çekiyoruz ===
+
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 creds = service_account.Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
     scopes=SCOPES
 )
 
-# === Sheets servisini başlat ===
 service = build("sheets", "v4", credentials=creds)
 sheet = service.spreadsheets()
-
-# === Google Sheet dosyanızın ID'si ===
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
 # === Yardımcı Fonksiyon ===
