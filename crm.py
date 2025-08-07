@@ -10,19 +10,17 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
 
-# -- Google Sheets için ayarlar --
+# --- Google Sheets Ayarları ---
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
+SPREADSHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
-# -- !!! LÜTFEN BURADA SADECE Sheet ID'nizi DEĞİŞTİRİN !!! --
-SPREADSHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"  # <-- Sadece bu satır değişecek
-
-# -- Streamlit Cloud'da .toml'a eklenen "secrets" ile credential'ı çekiyoruz --
+# secrets.toml'da aşağıdaki anahtar olmalı: [service_account]
 credentials = Credentials.from_service_account_info(
-    st.secrets["service_account"],   # secrets.toml içinde anahtar "service_account" olarak olmalı!
+    st.secrets["service_account"],   # Streamlit Cloud secrets panelindeki anahtar!
     scopes=SCOPES,
 )
 gc = gspread.authorize(credentials)
