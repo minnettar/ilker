@@ -21,10 +21,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-SPREADSHEET_ID = "1oQecN1xnsi9Eir0z3yyGWBcpOUKpg13lT_pAr5zp5AM"  # <-- kendi ID'n!
-
 credentials = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],   # secrets.toml içindeki anahtar (dict objesi)
+    st.secrets["service_account"],   # ANAHTAR ADI ARTIK BU!
     scopes=SCOPES,
 )
 gc = gspread.authorize(credentials)
