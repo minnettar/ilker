@@ -20,43 +20,66 @@ from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 import pickle
 
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-CLIENT_SECRET_FILE = "client_secret_370619069251-kl99fgfn1noumguvm5gej1gn257jiaku.apps.googleusercontent.com.json"
-SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
+# --- Sabitler ---
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"   # kendi sheet’in
 
-def get_gspread_client():
+# --- Google OAuth Akışı ---
+def get_credentials():
     creds = None
-    # Token dosyası var mı? (Daha önce giriş yaptıysa)
+    # 1. Daha önce login olduysa, token.pickle'dan yükle
     if os.path.exists("token.pickle"):
         with open("token.pickle", "rb") as token:
             creds = pickle.load(token)
-    # Token yoksa, kullanıcıdan yetki al
+    # 2. Token yoksa ya da expired ise yeniden login iste
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = Flow.from_client_secrets_file(
-                CLIENT_SECRET_FILE, SCOPES,
-                redirect_uri="https://sekerexpo.streamlit.app/"
+            # -- client_secret_xxx.json içeriğini Streamlit secrets'tan al --
+            client_config = dict(st.secrets["google_client_secret"])
+            # Cloud’da çalışıyorsan burayı kendi adresinle değiştir!
+            REDIRECT_URI = st.secrets.get("cloud_redirect_uri", "http://localhost:8501")
+            flow = Flow.from_client_config(
+                client_config,
+                SCOPES,
+                redirect_uri=REDIRECT_URI
             )
             auth_url, _ = flow.authorization_url(prompt='consent')
-            st.write(f"Yetki için [Google hesabınızla giriş yapın]({auth_url})")
-            code = st.text_input("Yukarıdaki linkten kodu alın ve buraya yapıştırın")
+            st.markdown(f"### 👇 Google ile Giriş yapmak için [buraya tıkla]({auth_url})")
+            code = st.text_input("Google ekranından kopyaladığınız kodu buraya yapıştırın:")
             if code:
                 flow.fetch_token(code=code)
                 creds = flow.credentials
                 with open("token.pickle", "wb") as token:
                     pickle.dump(creds, token)
-    # Gspread Client oluştur
-    client = gspread.authorize(creds)
-    return client
+                st.success("Google ile giriş başarılı, sayfayı yenile!")
+                st.stop()
+            else:
+                st.stop()
+    return creds
 
-# --- Ana kod ---
-gc = get_gspread_client()
-sh = gc.open_by_key(SHEET_ID)
-worksheet = sh.worksheet("Sayfa1")
-df = pd.DataFrame(worksheet.get_all_records())
-st.dataframe(df)
+creds = get_credentials()
+
+# --- Google Sheets API erişimi ---
+service = build('sheets', 'v4', credentials=creds)
+sheet = service.spreadsheets()
+
+def sheet_to_df(sheet, sheet_id, sheet_name):
+    result = sheet.values().get(spreadsheetId=sheet_id, range=sheet_name).execute()
+    values = result.get('values', [])
+    if not values:
+        return pd.DataFrame()
+    return pd.DataFrame(values[1:], columns=values[0])
+
+def df_to_sheet(sheet, sheet_id, sheet_name, df):
+    values = [df.columns.tolist()] + df.fillna("").astype(str).values.tolist()
+    sheet.values().update(
+        spreadsheetId=sheet_id,
+        range=sheet_name,
+        valueInputOption="RAW",
+        body={"values": values}
+    ).execute()
 
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
