@@ -14,6 +14,7 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
 
+# ========== GOOGLE SHEETS BAĞLANTISI ==========
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/spreadsheets",
@@ -21,21 +22,18 @@ SCOPES = [
 ]
 
 credentials = Credentials.from_service_account_info(
-    st.secrets,  # Cloud'da secrets'tan direkt okur
+    st.secrets,  # Streamlit Cloud'da .streamlit/secrets.toml ile kullanılır
     scopes=SCOPES,
 )
-
 gc = gspread.authorize(credentials)
+sh = gc.open("CRM")  # Google Sheets dosya adı: CRM (uzantı yok)
 
-st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
-
-# ==== KULLANICI GİRİŞİ SİSTEMİ ====
+# ========== KULLANICI GİRİŞİ ==========
 USERS = {
     "export1": "Seker12345!",
     "admin": "Seker12345!",
     "Boss": "Seker12345!",
 }
-
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -56,12 +54,11 @@ if not st.session_state.user:
     login_screen()
     st.stop()
 
-# Sol menüde çıkış butonu
 if st.sidebar.button("Çıkış Yap"):
     st.session_state.user = None
     st.rerun()
 
-# --- Ülke ve Temsilci Listeleri ---
+# ========== LİSTELER ==========
 ulke_listesi = sorted([
     "Afganistan", "Almanya", "Amerika Birleşik Devletleri", "Andorra", "Angola", "Antigua ve Barbuda", "Arjantin",
     "Arnavutluk", "Avustralya", "Avusturya", "Azerbaycan", "Bahamalar", "Bahreyn", "Bangladeş", "Barbados", "Belçika",
@@ -89,11 +86,12 @@ ulke_listesi = sorted([
     "Yemen", "Yeni Zelanda", "Yunanistan", "Zambiya", "Zimbabve"
 ]) + ["Diğer"]
 
-temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIRIM", "FERHAT ŞEKEROĞLU"]
+temsilci_listesi = [
+    "KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIRIM", "FERHAT ŞEKEROĞLU"
+]
 
-# --- LOGO (WEB LINKİNDEN AL) ---
+# ========== LOGO ==========
 logo_url = "https://www.sekeroglugroup.com/storage/settings/xdp5r6DZIFJMNGOStqwvKCiVHDhYxA84jFr61TNp.svg"
-
 col1, col2 = st.columns([3, 7])
 with col1:
     st.image(logo_url, width=300)
@@ -109,23 +107,74 @@ with col2:
         </div>
     """, unsafe_allow_html=True)
 
-# --- DataFrame'leri Google Sheets'ten Okuma ---
+# ========== TÜM SHEETLERİ OKU ==========
 def read_all_dataframes():
-    # Tüm sheetler için dene, hata olursa boş dataframe döndür
-    ...
+    try:
+        ws_musteri = sh.worksheet("Sayfa1")
+        df_musteri = get_as_dataframe(ws_musteri, evaluate_formulas=True, na_filter=False)
+        df_musteri = df_musteri.loc[:, ~df_musteri.columns.str.contains('^Unnamed')]
+    except Exception:
+        df_musteri = pd.DataFrame(columns=[
+            "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke", "Satış Temsilcisi",
+            "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli"
+        ])
+
+    try:
+        ws_kayit = sh.worksheet("Kayıtlar")
+        df_kayit = get_as_dataframe(ws_kayit, evaluate_formulas=True, na_filter=False)
+        df_kayit = df_kayit.loc[:, ~df_kayit.columns.str.contains('^Unnamed')]
+    except Exception:
+        df_kayit = pd.DataFrame(columns=["Müşteri Adı", "Tarih", "Tip", "Açıklama"])
+
+    try:
+        ws_teklif = sh.worksheet("Teklifler")
+        df_teklif = get_as_dataframe(ws_teklif, evaluate_formulas=True, na_filter=False)
+        df_teklif = df_teklif.loc[:, ~df_teklif.columns.str.contains('^Unnamed')]
+    except Exception:
+        df_teklif = pd.DataFrame(columns=[
+            "Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama", "Durum", "PDF"
+        ])
+
+    try:
+        ws_proforma = sh.worksheet("Proformalar")
+        df_proforma = get_as_dataframe(ws_proforma, evaluate_formulas=True, na_filter=False)
+        df_proforma = df_proforma.loc[:, ~df_proforma.columns.str.contains('^Unnamed')]
+    except Exception:
+        df_proforma = pd.DataFrame(columns=[
+            "Müşteri Adı", "Tarih", "Proforma No", "Tutar", "Açıklama", "Durum", "PDF", "Sipariş Formu", "Vade", "Sevk Durumu"
+        ])
+
+    try:
+        ws_evrak = sh.worksheet("Evraklar")
+        df_evrak = get_as_dataframe(ws_evrak, evaluate_formulas=True, na_filter=False)
+        df_evrak = df_evrak.loc[:, ~df_evrak.columns.str.contains('^Unnamed')]
+    except Exception:
+        df_evrak = pd.DataFrame(columns=[
+            "Müşteri Adı", "Fatura No", "Fatura Tarihi", "Vade Tarihi", "Tutar",
+            "Commercial Invoice", "Sağlık Sertifikası", "Packing List",
+            "Konşimento", "İhracat Beyannamesi", "Fatura PDF", "Sipariş Formu",
+            "Yük Resimleri", "EK Belgeler"
+        ])
+
+    try:
+        ws_eta = sh.worksheet("ETA")
+        df_eta = get_as_dataframe(ws_eta, evaluate_formulas=True, na_filter=False)
+        df_eta = df_eta.loc[:, ~df_eta.columns.str.contains('^Unnamed')]
+    except Exception:
+        df_eta = pd.DataFrame(columns=["Müşteri Adı", "Proforma No", "ETA Tarihi", "Açıklama"])
+
+    try:
+        ws_fuar_musteri = sh.worksheet("FuarMusteri")
+        df_fuar_musteri = get_as_dataframe(ws_fuar_musteri, evaluate_formulas=True, na_filter=False)
+        df_fuar_musteri = df_fuar_musteri.loc[:, ~df_fuar_musteri.columns.str.contains('^Unnamed')]
+    except Exception:
+        df_fuar_musteri = pd.DataFrame(columns=[
+            "Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail", "Açıklamalar", "Tarih"
+        ])
+
     return (df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri)
 
-# --- DataFrame'leri Google Sheets'e Yazma ---
-def update_all_sheets(df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri):
-    set_with_dataframe(sh.worksheet("Sayfa1"), df_musteri)
-    set_with_dataframe(sh.worksheet("Kayıtlar"), df_kayit)
-    set_with_dataframe(sh.worksheet("Teklifler"), df_teklif)
-    set_with_dataframe(sh.worksheet("Proformalar"), df_proforma)
-    set_with_dataframe(sh.worksheet("Evraklar"), df_evrak)
-    set_with_dataframe(sh.worksheet("ETA"), df_eta)
-    set_with_dataframe(sh.worksheet("FuarMusteri"), df_fuar_musteri)
-
-# --- KODUNUN BAŞLANGICINDA BU SATIRI KOY! ---
+# ========== DATAFRAME'LERİ YÜKLE ==========
 df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri = read_all_dataframes()
 
 if menu == "Özet Ekran":
