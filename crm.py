@@ -45,24 +45,64 @@ if st.sidebar.button("🚪 Çıkış Yap"):
     st.session_state.user = None
     st.rerun()
 
-# === Google Sheets Bağlantısı ===
-scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-client = gspread.authorize(credentials)
+import gspread
+import pandas as pd
+from google.oauth2.service_account import Credentials
 
-# === Sheet Ayarları ===
+# === Google Sheets Bağlantısı ===
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+creds = Credentials.from_service_account_file("google_service_account.json", scopes=SCOPES)
+client = gspread.authorize(creds)
 sheet = client.open_by_url(SPREADSHEET_URL)
 
-try:
-    musteri_sheet = sheet.worksheet("Sayfa1")
-    kayit_sheet = sheet.worksheet("Kayıtlar")
+# === Yardımcı Fonksiyon ===
+def load_sheet_as_df(sheet_name, columns):
+    try:
+        worksheet = sheet.worksheet(sheet_name)
+        data = worksheet.get_all_records()
+        df = pd.DataFrame(data)
+        # Eksik sütun varsa ekleyelim
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+        return df
+    except Exception:
+        return pd.DataFrame(columns=columns)
 
-    df_musteri = pd.DataFrame(musteri_sheet.get_all_records())
-    df_kayit = pd.DataFrame(kayit_sheet.get_all_records())
-except Exception as e:
-    st.error(f"Google Sheet bağlantısı başarısız: {e}")
-    st.stop()
+# === Tüm Sayfaları DataFrame olarak Yükle ===
+df_musteri = load_sheet_as_df("Sayfa1", [
+    "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke",
+    "Satış Temsilcisi", "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli"
+])
+
+df_kayit = load_sheet_as_df("Kayıtlar", [
+    "Müşteri Adı", "Tarih", "Tip", "Açıklama"
+])
+
+df_teklif = load_sheet_as_df("Teklifler", [
+    "Müşteri Adı", "Tarih", "Teklif No", "Tutar",
+    "Ürün/Hizmet", "Açıklama", "Durum", "PDF"
+])
+
+df_proforma = load_sheet_as_df("Proformalar", [
+    "Müşteri Adı", "Tarih", "Proforma No", "Tutar", "Açıklama",
+    "Durum", "PDF", "Sipariş Formu", "Vade", "Sevk Durumu"
+])
+
+df_evrak = load_sheet_as_df("Evraklar", [
+    "Müşteri Adı", "Fatura No", "Fatura Tarihi", "Vade Tarihi", "Tutar",
+    "Commercial Invoice", "Sağlık Sertifikası", "Packing List", "Konşimento",
+    "İhracat Beyannamesi", "Fatura PDF", "Sipariş Formu", "Yük Resimleri", "EK Belgeler"
+])
+
+df_eta = load_sheet_as_df("ETA", [
+    "Müşteri Adı", "Proforma No", "ETA Tarihi", "Açıklama"
+])
+
+df_fuar_musteri = load_sheet_as_df("FuarMusteri", [
+    "Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail", "Açıklamalar", "Tarih"
+])
 
 # === Ülke ve Temsilci Listeleri ===
 ulke_listesi = sorted([
