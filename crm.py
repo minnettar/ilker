@@ -8,6 +8,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import smtplib
 from email.message import EmailMessage
+import tempfile 
 
 # ==== KULLANICI GİRİŞİ SİSTEMİ ====
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
