@@ -450,7 +450,7 @@ if menu == "Cari Ekleme":
                     "DT Seçimi": dt_secim  # DT seçimini ekliyoruz
                 }
                 df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
-                update_excel()
+                update_all_sheets()
 
                 # Yeni cari için TXT oluştur ve maille gönder
                 yeni_cari_txt_olustur(new_row)
