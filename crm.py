@@ -8,10 +8,8 @@ import datetime
 import smtplib
 from email.message import EmailMessage
 import numpy as np
-import gspread
-from google.oauth2.service_account 
-import Credentials
-from gspread_dataframe 
+import gspread from google.oauth2.service_account 
+import Credentials from gspread_dataframe 
 import get_as_dataframe, set_with_dataframe
 import json
 import os
