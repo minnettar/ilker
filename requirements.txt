@@ -9,3 +9,4 @@ google-auth-httplib2
 pydrive2
 fpdf
 oauth2client
+google-api-python-client
