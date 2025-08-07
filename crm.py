@@ -16,7 +16,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-SPREADSHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
+sheet_id = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
 # secrets.toml'da aşağıdaki anahtar olmalı: [service_account]
 credentials = Credentials.from_service_account_info(
