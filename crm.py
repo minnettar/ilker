@@ -303,6 +303,24 @@ if menu == "Cari Ekleme":
 
 import numpy as np  # Eksik bilgi mesajı için gerekli
 
+# --- Sheet'ten müşteri verilerini oku ---
+def read_musteri_sheet():
+    try:
+        sheet_range = "Müşteriler!A1:L"  # İlk satır başlık
+        result = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_range).execute()
+        values = result.get("values", [])
+        if not values:
+            return pd.DataFrame(columns=[
+                "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke", "Satış Temsilcisi",
+                "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli", "Para Birimi", "DT Seçimi"
+            ])
+        else:
+            df = pd.DataFrame(values[1:], columns=values[0])
+            return df
+    except Exception as e:
+        st.error(f"Sheet okuma hatası: {e}")
+        return pd.DataFrame()
+
 # df_musteri'yi session_state'te sakla
 if "df_musteri" not in st.session_state:
     st.session_state.df_musteri = pd.DataFrame(columns=[
