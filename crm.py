@@ -177,42 +177,8 @@ def read_all_dataframes():
 # ========== DATAFRAME'LERİ YÜKLE ==========
 df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri = read_all_dataframes()
 
-# --- Renkli Menü CSS ---
-st.sidebar.markdown("""
-<style>
-.menu-btn {
-    display: block;
-    width: 100%;
-    padding: 1em;
-    margin-bottom: 10px;
-    border: none;
-    border-radius: 15px;
-    font-size: 1.2em;
-    font-weight: bold;
-    color: white !important;
-    cursor: pointer;
-    transition: background 0.18s;
-    text-align: left;
-    border: 2px solid transparent;
-}
-.menu-ozet {background: linear-gradient(90deg, #43cea2, #185a9d);}
-.menu-cari {background: linear-gradient(90deg, #43cea2, #185a9d);}
-.menu-musteri {background: linear-gradient(90deg, #ffb347, #ffcc33);}
-.menu-gorusme {background: linear-gradient(90deg, #ff5e62, #ff9966);}
-.menu-teklif {background: linear-gradient(90deg, #8e54e9, #4776e6);}
-.menu-proforma {background: linear-gradient(90deg, #11998e, #38ef7d);}
-.menu-siparis {background: linear-gradient(90deg, #f7971e, #ffd200);}
-.menu-evrak {background: linear-gradient(90deg, #f953c6, #b91d73);}
-.menu-vade {background: linear-gradient(90deg, #43e97b, #38f9d7);}
-.menu-eta {background: linear-gradient(90deg, #f857a6, #ff5858);}
-.menu-fuar {background: linear-gradient(90deg, #757F9A, #D7DDE8);}
-.menu-medya {background: linear-gradient(90deg, #B993D6, #8CA6DB);}
-.menu-btn:hover, .menu-btn.selected {filter: brightness(1.13); border: 2px solid #fff;}
-</style>
-""", unsafe_allow_html=True)
-
-# --- Menü Tanımları ---
-MENU_OPTIONS = [
+# Menüler tanımı
+menuler = [
     ("Özet Ekran", "menu-ozet", "📊"),
     ("Cari Ekleme", "menu-cari", "🧑‍💼"),
     ("Müşteri Listesi", "menu-musteri", "📒"),
@@ -227,38 +193,54 @@ MENU_OPTIONS = [
     ("Medya Çekmecesi", "menu-medya", "🗂️"),
 ]
 
-if st.session_state.user == "Boss":
-    allowed_menus = [("Özet Ekran", "menu-ozet", "📊")]
-else:
-    allowed_menus = MENU_OPTIONS
-
+# İlk açılışta seçili menü (veya bir önceki seçim)
 if "menu_state" not in st.session_state:
-    st.session_state.menu_state = allowed_menus[0][0]
+    st.session_state.menu_state = menuler[0][0]
 
-# --- Yalnızca RENKLİ KUTULAR OLSUN, Streamlit'in kendi butonu olmadan! ---
-for name, css_class, icon in allowed_menus:
-    selected = "selected" if st.session_state.menu_state == name else ""
-    if st.sidebar.markdown(
-        f"""
-        <button class="menu-btn {css_class} {selected}" onclick="window.location.search='?menu={name}'">
-            {icon} {name}
-        </button>
-        """, unsafe_allow_html=True
-    ):
-        st.session_state.menu_state = name
+st.sidebar.markdown("""
+<style>
+.menu-btn {
+    display: block;
+    width: 100%;
+    padding: 1em;
+    margin-bottom: 10px;
+    border: none;
+    border-radius: 10px;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: white;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.menu-ozet {background: linear-gradient(90deg, #43cea2, #185a9d);}
+.menu-cari {background: linear-gradient(90deg, #ffb347, #ffcc33);}
+.menu-musteri {background: linear-gradient(90deg, #8e54e9, #4776e6);}
+.menu-gorusme {background: linear-gradient(90deg, #ff5e62, #ff9966);}
+.menu-teklif {background: linear-gradient(90deg, #8e54e9, #4776e6);}
+.menu-proforma {background: linear-gradient(90deg, #11998e, #38ef7d);}
+.menu-siparis {background: linear-gradient(90deg, #f7971e, #ffd200);}
+.menu-evrak {background: linear-gradient(90deg, #f953c6, #b91d73);}
+.menu-vade {background: linear-gradient(90deg, #43e97b, #38f9d7);}
+.menu-eta {background: linear-gradient(90deg, #f857a6, #ff5858);}
+.menu-fuar {background: linear-gradient(90deg, #434343, #a4b0be);}
+.menu-medya {background: linear-gradient(90deg, #a770ef, #cf8bf3);}
+.menu-btn:hover {filter: brightness(1.2);}
+</style>
+""", unsafe_allow_html=True)
 
-# --- Menü seçimini almak için, query param'dan çek (HTML butonları için workaround) ---
-import streamlit as st
-from urllib.parse import parse_qs
+for isim, renk, ikon in menuler:
+    buton_html = f"""
+    <button class="menu-btn {renk}" onclick="window.location.search='?menu={isim}'">
+        {ikon} {isim}
+    </button>
+    """
+    st.sidebar.markdown(buton_html, unsafe_allow_html=True)
 
-params = st.experimental_get_query_params()
-if "menu" in params:
-    menu_from_url = params["menu"][0]
-    menu_names = [m[0] for m in allowed_menus]
-    if menu_from_url in menu_names:
-        st.session_state.menu_state = menu_from_url
-        # Temizle ki aynı menü tekrar gelmesin
-        st.experimental_set_query_params()
+# Query param ile seçim (Streamlit 1.34+ için güvenli yöntem)
+import urllib.parse
+params = st.query_params
+if "menu" in params and params["menu"][0] in [m[0] for m in menuler]:
+    st.session_state.menu_state = params["menu"][0]
 
 menu = st.session_state.menu_state
 
