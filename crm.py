@@ -986,7 +986,7 @@ elif menu == "Vade Takibi":
     )
     
     if menu == "ETA Takibi":
-    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ETA Takibi</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ETA Takibi</h2>", unsafe_allow_html=True)
 
     # Eksik sütunları ekle
     for col in ["Sevk Durumu", "Proforma No", "Sevk Tarihi", "Ulaşma Tarihi"]:
