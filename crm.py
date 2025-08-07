@@ -55,7 +55,7 @@ SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1nKuBKJPzpYC5TxNvc4G2O
 sheet = client.open_by_url(SPREADSHEET_URL)
 
 try:
-    musteri_sheet = sheet.worksheet("Müşteri")
+    musteri_sheet = sheet.worksheet("Sayfa1")
     kayit_sheet = sheet.worksheet("Kayıtlar")
 
     df_musteri = pd.DataFrame(musteri_sheet.get_all_records())
