@@ -984,7 +984,8 @@ elif menu == "Vade Takibi":
         ][["Müşteri Adı", "Ülke", "Satış Temsilcisi", "Ödeme Şekli", "Proforma No", "Fatura No", "Fatura Tarihi", "Vade (gün)", "Vade Tarihi", "Tutar"]],
         use_container_width=True
     )
-    elif menu == "ETA Takibi":
+    
+    if menu == "ETA Takibi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ETA Takibi</h2>", unsafe_allow_html=True)
 
     # Eksik sütunları ekle
