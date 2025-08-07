@@ -71,7 +71,7 @@ def load_sheet_as_df(sheet_name, columns):
             if col not in df.columns:
                 df[col] = ""
         return df
-    except Exception as e:
+except Exception as e:
         print(f"{sheet_name} sayfası yüklenirken hata oluştu:", e)
         return pd.DataFrame(columns=columns)
         
