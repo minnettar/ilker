@@ -28,7 +28,7 @@ sheet = service.spreadsheets()
 
 # Google Sheet ID ve aralık
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
-RANGE = "Müşteri!A1:Z50"  # 50 satıra kadar veri getir
+RANGE = "Sayfa1!A1:Z50"  # 50 satıra kadar veri getir
 
 try:
     result = sheet.values().get(spreadsheetId=SHEET_ID, range=RANGE).execute()
