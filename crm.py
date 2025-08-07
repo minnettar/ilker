@@ -8,13 +8,11 @@ import datetime
 import smtplib
 from email.message import EmailMessage
 import numpy as np
-import gspread from google.oauth2.service_account 
-import Credentials from gspread_dataframe 
-import get_as_dataframe, set_with_dataframe
+import gspread
+from google.oauth2.service_account import Credentials
+from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import json
 import os
-
-# ========== GOOGLE SHEETS BAĞLANTISI ==========
 
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
@@ -23,11 +21,12 @@ SCOPES = [
 ]
 
 credentials = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],   # secrets.toml içindeki anahtar (dict objesi)
+    st.secrets,  # Cloud'da secrets'tan direkt okur
     scopes=SCOPES,
 )
+
 gc = gspread.authorize(credentials)
-sh = gc.open_by_key(SPREADSHEET_ID)
+
 
 # ========== KULLANICI GİRİŞİ ==========
 USERS = {
