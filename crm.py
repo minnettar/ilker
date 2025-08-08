@@ -53,36 +53,44 @@ if st.sidebar.button("🚪 Çıkış Yap"):
 from google.oauth2 import service_account
 
 
+# === Google Sheets Ayarları ===
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 creds = service_account.Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
     scopes=SCOPES
 )
-
 service = build("sheets", "v4", credentials=creds)
 sheet = service.spreadsheets()
+
+# === Google Sheets ID ===
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
-# === Yardımcı Fonksiyon ===
+# === Yardımcı Fonksiyon: Sayfayı DataFrame'e çevir ===
 def load_sheet_as_df(sheet_name, columns):
     try:
-        worksheet = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_name).execute()
-        values = worksheet.get("values", [])
+        result = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_name).execute()
+        values = result.get("values", [])
         if not values:
             return pd.DataFrame(columns=columns)
-        
-        df = pd.DataFrame(values[1:], columns=values[0])
-        
-        # Eksik sütunları ekle
+
+        # Başlık ve veri ayrımı
+        header = values[0]
+        rows = values[1:]
+        df = pd.DataFrame(rows, columns=header)
+
+        # Eksik sütun varsa ekle
         for col in columns:
             if col not in df.columns:
                 df[col] = ""
+
         return df
     except Exception as e:
-        print(f"{sheet_name} sayfası yüklenirken hata oluştu:", e)
+        st.error(f"{sheet_name} sayfası yüklenirken hata oluştu: {e}")
         return pd.DataFrame(columns=columns)
+
         
-# === Tüm Sayfaları DataFrame olarak Yükle ===
+# === Tüm Google Sheet Sayfalarını Yükle ===
+
 df_musteri = load_sheet_as_df("Sayfa1", [
     "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke",
     "Satış Temsilcisi", "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli"
@@ -115,6 +123,33 @@ df_eta = load_sheet_as_df("ETA", [
 df_fuar_musteri = load_sheet_as_df("FuarMusteri", [
     "Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail", "Açıklamalar", "Tarih"
 ])
+
+def update_google_sheets():
+    try:
+        def write_df(sheet_name, df):
+            values = [df.columns.tolist()] + df.values.tolist()
+            body = {
+                "values": values
+            }
+            sheet.values().update(
+                spreadsheetId=SHEET_ID,
+                range=sheet_name,
+                valueInputOption="RAW",
+                body=body
+            ).execute()
+
+        write_df("Sayfa1", df_musteri)
+        write_df("Kayıtlar", df_kayit)
+        write_df("Teklifler", df_teklif)
+        write_df("Proformalar", df_proforma)
+        write_df("Evraklar", df_evrak)
+        write_df("ETA", df_eta)
+        write_df("FuarMusteri", df_fuar_musteri)
+
+        st.success("Tüm veriler Google Sheets'e başarıyla kaydedildi.")
+    except Exception as e:
+        st.error(f"Google Sheets'e yazarken hata oluştu: {e}")
+
 
 # === Ülke ve Temsilci Listeleri ===
 ulke_listesi = sorted([
