@@ -996,27 +996,26 @@ if durum_ == "Siparişe Dönüştü":
                 try: os.remove(temp_path)
                 except: pass
 
+  # Diğer alanlar için sadece güncelle!
+    if guncelle:
+        df_proforma.at[sec_index, "Tarih"] = tarih_
+        df_proforma.at[sec_index, "Proforma No"] = proforma_no_
+        df_proforma.at[sec_index, "Tutar"] = tutar_
+        df_proforma.at[sec_index, "Vade (gün)"] = vade_gun_
+        df_proforma.at[sec_index, "Açıklama"] = aciklama_
+    if durum_ != "Siparişe Dönüştü":
+        df_proforma.at[sec_index, "Durum"] = durum_
+        update_google_sheets()
+        st.success("Proforma güncellendi!")
+        st.rerun()
 
-                    # Diğer alanlar için sadece güncelle!
-                    if guncelle:
-                        df_proforma.at[sec_index, "Tarih"] = tarih_
-                        df_proforma.at[sec_index, "Proforma No"] = proforma_no_
-                        df_proforma.at[sec_index, "Tutar"] = tutar_
-                        df_proforma.at[sec_index, "Vade (gün)"] = vade_gun_
-                        df_proforma.at[sec_index, "Açıklama"] = aciklama_
-                        if durum_ != "Siparişe Dönüştü":
-                            df_proforma.at[sec_index, "Durum"] = durum_
-                        update_google_sheets()
-                        st.success("Proforma güncellendi!")
-                        st.rerun()
-
-                    if sil:
-                        df_proforma = df_proforma.drop(sec_index).reset_index(drop=True)
-                        update_google_sheets()
-                        st.success("Kayıt silindi!")
-                        st.rerun()
-                else:
-                    st.warning("Lütfen bir proforma seçin.")
+    if sil:
+        df_proforma = df_proforma.drop(sec_index).reset_index(drop=True)
+        update_google_sheets()
+        st.success("Kayıt silindi!")
+        st.rerun()
+    else:
+        st.warning("Lütfen bir proforma seçin.")
 
 
 ### ===========================
