@@ -8,6 +8,18 @@ import os
 import smtplib
 from email.message import EmailMessage
 import numpy as np
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
+def upload_file_to_drive(filename, mimetype, folder_id, creds):
+    service = build("drive", "v3", credentials=creds)
+    file_metadata = {
+        'name': filename,
+        'parents': [folder_id]
+    }
+    media = MediaFileUpload(filename, mimetype=mimetype)
+    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    return file.get('id')
 
 # === Streamlit Ayarları ===
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
@@ -930,33 +942,60 @@ elif menu == "Proforma Takibi":
                         guncelle = st.form_submit_button("Güncelle")
                         sil = st.form_submit_button("Sil")
 
-                    # Siparişe Dönüştü ise ayrı form!
-                    if durum_ == "Siparişe Dönüştü":
-                        st.info("Lütfen sipariş formunu yükleyin ve ardından 'Sipariş Formunu Kaydet' butonuna basın.")
-                        with st.form(f"siparis_formu_upload_{sec_index}"):
-                            siparis_formu_file = st.file_uploader("Sipariş Formu PDF", type="pdf")
-                            siparis_kaydet = st.form_submit_button("Sipariş Formunu Kaydet")
 
-                        if siparis_kaydet:
-                            if siparis_formu_file is None:
-                                st.error("Sipariş formu yüklemelisiniz.")
-                            else:
-                                siparis_formu_fname = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-                                temp_path = os.path.join(".", siparis_formu_fname)
-                                with open(temp_path, "wb") as f:
-                                    f.write(siparis_formu_file.read())
-                                gfile = drive.CreateFile({'title': siparis_formu_fname, 'parents': [{'id': "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"}]})
-                                gfile.SetContentFile(temp_path)
-                                gfile.Upload()
-                                siparis_formu_url = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
-                                try: os.remove(temp_path)
-                                except: pass
-                                # Hem sipariş formu hem durum burada güncellenir!
-                                df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
-                                df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
-                                update_google_sheets()
-                                st.success("Sipariş formu kaydedildi ve durum güncellendi!")
-                                st.rerun()
+
+
+def upload_file_to_drive(folder_id, file_path, file_name):
+    file_metadata = {
+        'name': file_name,
+        'parents': [folder_id]
+    }
+    media = MediaFileUpload(file_path, mimetype='application/pdf')
+    uploaded_file = drive_service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id'
+    ).execute()
+    return uploaded_file.get('id')
+
+# === Siparişe Dönüştü kontrolü ===
+if durum_ == "Siparişe Dönüştü":
+    st.info("Lütfen sipariş formunu yükleyin ve ardından 'Sipariş Formunu Kaydet' butonuna basın.")
+    with st.form(f"siparis_formu_upload_{sec_index}"):
+        siparis_formu_file = st.file_uploader("Sipariş Formu PDF", type="pdf")
+        siparis_kaydet = st.form_submit_button("Sipariş Formunu Kaydet")
+
+    if siparis_kaydet:
+        if siparis_formu_file is None:
+            st.error("Sipariş formu yüklemelisiniz.")
+        else:
+            # Dosyayı geçici olarak kaydet
+            siparis_formu_fname = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+            temp_path = os.path.join(".", siparis_formu_fname)
+            with open(temp_path, "wb") as f:
+                f.write(siparis_formu_file.read())
+
+            try:
+                # Google Drive'a yükle
+                folder_id = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
+                file_id = upload_file_to_drive(folder_id, temp_path, siparis_formu_fname)
+                siparis_formu_url = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
+
+                # Veriyi güncelle
+                df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
+                df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
+
+                # Google Sheets'e yaz
+                update_google_sheet("Proformalar", df_proforma)
+
+                st.success("Sipariş formu yüklendi ve durum güncellendi.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Google Drive yükleme hatası: {e}")
+            finally:
+                try: os.remove(temp_path)
+                except: pass
+
 
                     # Diğer alanlar için sadece güncelle!
                     if guncelle:
