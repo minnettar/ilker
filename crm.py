@@ -126,29 +126,21 @@ df_fuar_musteri = load_sheet_as_df("FuarMusteri", [
 
 def update_google_sheets():
     try:
-        def write_df(sheet_name, df):
-            values = [df.columns.tolist()] + df.values.tolist()
-            body = {
-                "values": values
-            }
-            sheet.values().update(
-                spreadsheetId=SHEET_ID,
-                range=sheet_name,
-                valueInputOption="RAW",
-                body=body
-            ).execute()
+        df = df_musteri.fillna("")  # 👈 NaN temizleniyor
 
-        write_df("Sayfa1", df_musteri)
-        write_df("Kayıtlar", df_kayit)
-        write_df("Teklifler", df_teklif)
-        write_df("Proformalar", df_proforma)
-        write_df("Evraklar", df_evrak)
-        write_df("ETA", df_eta)
-        write_df("FuarMusteri", df_fuar_musteri)
+        values = [df.columns.tolist()] + df.values.tolist()
+        body = {"values": values}
 
-        st.success("Tüm veriler Google Sheets'e başarıyla kaydedildi.")
+        service.spreadsheets().values().update(
+            spreadsheetId=SHEET_ID,
+            range="Sayfa1",
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+        st.success("Google Sheets'e başarıyla yazıldı.")
     except Exception as e:
         st.error(f"Google Sheets'e yazarken hata oluştu: {e}")
+
 
 
 # === Ülke ve Temsilci Listeleri ===
