@@ -459,7 +459,7 @@ if menu == "Cari Ekleme":
                 yeni_cari_txt_olustur(new_row)
                 try:
                     send_email_with_txt(
-                        to_email=["muhasebe@sekeroglugroup.com", "h.boy@sekeroglugroup.com"],  # Birden fazla alıcı ekledik
+                        to_email=["export1@sekeroglugroup.com"],  # Birden fazla alıcı ekledik
                         subject="Yeni Cari Açılışı",
                         body="Muhasebe için yeni cari açılışı ekte gönderilmiştir.",
                         file_path="yeni_cari.txt"
