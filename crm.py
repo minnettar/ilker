@@ -960,6 +960,7 @@ def upload_file_to_drive(folder_id, file_path, file_name):
         'name': file_name,
         'parents': [folder_id]
     }
+    
     media = MediaFileUpload(file_path, mimetype='application/pdf')
     uploaded_file = drive_service.files().create(
         body=file_metadata,
