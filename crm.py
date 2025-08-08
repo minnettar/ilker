@@ -136,7 +136,17 @@ df_fuar_musteri = load_sheet_as_df("FuarMusteri", [
     "Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail", "Açıklamalar", "Tarih"
 ])
 
-def update_google_sheets():
+def update_google_sheet(sheet_name, df):
+    values = [df.columns.tolist()] + df.values.tolist()
+    body = {
+        'values': values
+    }
+    sheet.values().update(
+        spreadsheetId=SHEET_ID,
+        range=sheet_name,
+        valueInputOption="RAW",
+        body=body
+    ).execute()
     try:
         df = df_musteri.fillna("")  # 👈 NaN temizleniyor
 
