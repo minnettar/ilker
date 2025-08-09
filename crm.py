@@ -45,17 +45,19 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 # ======================
 # 3) GOOGLE SHEETS & DRIVE BAĞLANTILARI
 # ======================
+from googleapiclient.http import MediaFileUpload
+
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
 FIYAT_TEKLIFI_ID        = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
-PROFORMA_PDF_KLASOR_ID  = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"   # mevcut
-SIPARIS_FORMU_KLASOR_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"   # mevcut
+PROFORMA_PDF_KLASOR_ID  = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
+SIPARIS_FORMU_KLASOR_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
 EVRAK_KLASOR_ID         = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.readonly",
+    # İstersen: "https://www.googleapis.com/auth/drive"  # klasör izinleri/okuma için geniş kapsam
 ]
 
 creds = service_account.Credentials.from_service_account_info(
@@ -67,47 +69,106 @@ sheets_service = build("sheets", "v4", credentials=creds)
 sheet = sheets_service.spreadsheets()
 drive_service = build("drive", "v3", credentials=creds)
 
+
+def _safe_str(x):
+    # DataFrame -> Sheets güvenli string
+    if pd.isna(x):
+        return ""
+    if isinstance(x, (pd.Timestamp, datetime.datetime, datetime.date)):
+        try:
+            return pd.to_datetime(x).strftime("%Y-%m-%d")
+        except Exception:
+            return str(x)
+    return str(x)
+
+
 def df_to_values(df: pd.DataFrame):
+    if df is None or df.empty:
+        # Boşsa sadece başlıkları yazalım; başlık yoksa boş bir satır döndürme
+        cols = df.columns.tolist() if isinstance(df, pd.DataFrame) else []
+        return [cols] if cols else [[]]
     clean = df.copy()
     for c in clean.columns:
-        clean[c] = clean[c].apply(
-            lambda x: "" if pd.isna(x)
-            else (x.strftime("%Y-%m-%d") if isinstance(x, (datetime.date, datetime.datetime, pd.Timestamp)) else str(x))
-        )
+        clean[c] = clean[c].map(_safe_str)
     return [clean.columns.tolist()] + clean.values.tolist()
 
+
 def write_df(sheet_name: str, df: pd.DataFrame):
-    values = df_to_values(df)
-    sheet.values().clear(spreadsheetId=SHEET_ID, range=sheet_name).execute()
-    sheet.values().update(
-        spreadsheetId=SHEET_ID,
-        range=sheet_name,
-        valueInputOption="RAW",
-        body={"values": values}
-    ).execute()
+    try:
+        values = df_to_values(df)
+        # İlk önce temizle
+        sheet.values().clear(spreadsheetId=SHEET_ID, range=sheet_name).execute()
+        # Sonra yaz
+        sheet.values().update(
+            spreadsheetId=SHEET_ID,
+            range=sheet_name,
+            valueInputOption="RAW",
+            body={"values": values}
+        ).execute()
+    except Exception as e:
+        # Konsola/loga bas; UI’da gürültü yapmamak için raise etmiyoruz
+        print(f"'{sheet_name}' yazılırken hata: {e}")
+
 
 def update_google_sheets():
-    write_df("Sayfa1", df_musteri)
-    write_df("Kayıtlar", df_kayit)
-    write_df("Teklifler", df_teklif)
-    write_df("Proformalar", df_proforma)
-    write_df("Evraklar", df_evrak)
-    write_df("ETA", df_eta)
-    write_df("FuarMusteri", df_fuar_musteri)
+    write_df("Sayfa1",       df_musteri)
+    write_df("Kayıtlar",     df_kayit)
+    write_df("Teklifler",    df_teklif)
+    write_df("Proformalar",  df_proforma)
+    write_df("Evraklar",     df_evrak)
+    write_df("ETA",          df_eta)
+    write_df("FuarMusteri",  df_fuar_musteri)
+
+
+def _guess_mime_by_ext(filename: str) -> str:
+    ext = os.path.splitext(filename.lower())[1]
+    # Sık kullanılanlar
+    return {
+        ".pdf":  "application/pdf",
+        ".jpg":  "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png":  "image/png",
+        ".csv":  "text/csv",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls":  "application/vnd.ms-excel",
+        ".txt":  "text/plain",
+    }.get(ext, "application/octet-stream")
+
+
+def _sanitize_filename(name: str) -> str:
+    # Drive sorun çıkarmasın diye basit temizlik
+    keep = "-_.() "
+    return "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))[:180]
+
 
 def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
-    meta = {"name": filename, "parents": [folder_id]} if folder_id else {"name": filename}
-    media = MediaFileUpload(local_path, mimetype="application/pdf", resumable=False)
-    created = drive_service.files().create(body=meta, media_body=media, fields="id").execute()
+    """
+    Dosyayı Google Drive'a yükler ve paylaşılabilir görüntüleme linkini döner.
+    folder_id boş/None ise köke yükler.
+    """
+    safe_name = _sanitize_filename(filename)
+    mime = _guess_mime_by_ext(safe_name)
+    meta = {"name": safe_name}
+    if folder_id:
+        meta["parents"] = [folder_id]
+
+    media = MediaFileUpload(local_path, mimetype=mime, resumable=False)
+
+    created = drive_service.files().create(
+        body=meta, media_body=media, fields="id"
+    ).execute()
     fid = created["id"]
+
+    # Herkese görüntüleme izni (klasör zaten paylaşımlıysa sorun olmaz)
     try:
         drive_service.permissions().create(
             fileId=fid,
             body={"role": "reader", "type": "anyone"},
             fields="id"
         ).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Drive permission set warning (fileId={fid}): {e}")
+
     return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
 
 # ======================
