@@ -838,11 +838,12 @@ if durum_ == "Siparişe Dönüştü":
                     pass
 
             # Hem sipariş formu linkini hem de durumu güncelle
-            df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
-            df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
-            update_google_sheets()
-            st.success("Sipariş formu kaydedildi ve durum güncellendi!")
-            st.rerun()
+df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
+df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
+
+update_google_sheets()
+st.success("Sipariş formu kaydedildi ve durum güncellendi!")
+st.rerun()
 
                     # Diğer alanlar — güncelle
                     if guncelle:
