@@ -124,36 +124,22 @@ def load_sheet_as_df(sheet_name, columns):
         header = values[0]
         data_rows = values[1:]
 
-        # Başlığı istenmeyen boş/ek hücrelerden arındır
-        header = [h.strip() for h in header]
-        # Eğer başlık sayısı 2–100 arası ama "columns"tan farklıysa, "columns"u esas al
-        # (ETA gibi sayfalarda schema sabit kalsın)
+        # Sadece ETA’da şemayı sabitle
         if sheet_name == "ETA":
-            header = columns  # ETA için şemayı zorla
+            header = columns
 
-        # Satırları başlık uzunluğuna pad/truncate et
-        H = len(header)
-        fixed_rows = []
-        for r in data_rows:
-            r = list(r)
-            if len(r) < H:
-                r = r + [""] * (H - len(r))
-            elif len(r) > H:
-                r = r[:H]
-            fixed_rows.append(r)
+        df = pd.DataFrame(data_rows, columns=header)
 
-        df = pd.DataFrame(fixed_rows, columns=header)
-
-        # Eksik sütunları yine de ekle (diğer sayfalar için)
+        # Eksik sütun varsa ekle (diğer sayfalarda kırılmaz)
         for col in columns:
             if col not in df.columns:
                 df[col] = ""
 
         return df
     except Exception as e:
-        print(f"{sheet_name} sayfası yüklenirken hata: {e}")
+        print(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
         return pd.DataFrame(columns=columns)
-
+        
 # --- tüm sayfaları yükle ---
 df_musteri = load_sheet_as_df("Sayfa1", [
     "Müşteri Adı","Telefon","E-posta","Adres","Ülke",
