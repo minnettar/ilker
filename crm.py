@@ -137,10 +137,12 @@ def _sanitize_filename(name: str) -> str:
     return "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))[:180]
 
 import json
+from googleapiclient.errors import HttpError
 
 def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
+    # 0) Güvenli ad + MIME (dosya uzantısından)
     filename = _sanitize_filename(filename)
-    mime = _guess_mime_by_ext(filename)
+    mime = _guess_mime_by_ext(os.path.splitext(filename)[1] and filename or local_path)
 
     # 1) Klasör var mı ve gerçekten klasör mü?
     try:
@@ -150,7 +152,7 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
             supportsAllDrives=True
         ).execute()
         if meta_check.get("mimeType") != "application/vnd.google-apps.folder":
-            raise RuntimeError(f"Verilen ID bir klasör değil: {meta_check.get('name')} ({meta_check.get('mimeType')})")
+            raise RuntimeError(f"Verilen ID klasör değil: {meta_check.get('name')} ({meta_check.get('mimeType')})")
     except Exception as e:
         raise RuntimeError(f"Klasör ID doğrulanamadı: {folder_id} | Hata: {e}")
 
@@ -166,7 +168,7 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
         ).execute()
         fid = created["id"]
 
-        # 3) "Bağlantıya sahip olan herkes görüntülesin"
+        # 3) Herkese görüntüleme izni (politika izin veriyorsa)
         try:
             drive_service.permissions().create(
                 fileId=fid,
@@ -179,23 +181,18 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
 
         return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
 
-    except Exception as e:
-        # HttpError ise okunur hale getir
+    except HttpError as e:
+        # Drive hatasını daha okunur göster
         try:
-            from googleapiclient.errors import HttpError
-            if isinstance(e, HttpError):
-                try:
-                    err = json.loads(e.content.decode()).get("error", {})
-                    code = err.get("code")
-                    msg = err.get("message")
-                    reason = ", ".join([(x.get("reason") or "") for x in err.get("errors", []) if isinstance(x, dict)])
-                    raise RuntimeError(f"Drive yükleme hatası (code={code}, reason={reason}): {msg}")
-                except Exception:
-                    raise RuntimeError(f"Drive yükleme hatası: {e}")
-            else:
-                raise
-        except RuntimeError:
-            raise
+            err = json.loads(e.content.decode()).get("error", {})
+            code = err.get("code")
+            msg = err.get("message")
+            reason = ", ".join([(x.get("reason") or "") for x in err.get("errors", []) if isinstance(x, dict)])
+            raise RuntimeError(f"Drive yükleme hatası (code={code}, reason={reason}): {msg}")
+        except Exception:
+            raise RuntimeError(f"Drive yükleme hatası: {e}")
+    except Exception as e:
+        raise
 
 # ======================
 # 3b) SHEETS -> DATAFRAME YÜKLEME
