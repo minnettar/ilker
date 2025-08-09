@@ -9,6 +9,7 @@ import streamlit as st
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
+import numpy as np
 
 # ======================
 # 2) ÜLKE ve TEMSİLCİ LİSTELERİ
