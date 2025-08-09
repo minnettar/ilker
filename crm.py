@@ -824,30 +824,38 @@ elif menu == "Proforma Takibi":
                         guncelle = st.form_submit_button("Güncelle")
                         sil = st.form_submit_button("Sil")
 
-                    # Siparişe Dönüştü ise: ekstra sipariş formu yükleme
-                    if durum_ == "Siparişe Dönüştü":
-                        st.info("Sipariş formunu yükleyin ve kaydedin.")
-                        with st.form(f"siparis_formu_upload_{sec_index}"):
-                            s_file = st.file_uploader("Sipariş Formu PDF", type="pdf")
-                            s_kaydet = st.form_submit_button("Sipariş Formunu Kaydet")
+                    # --- Siparişe Dönüştü ise ayrı form ---
+if durum_ == "Siparişe Dönüştü":
+    st.info("Lütfen sipariş formunu yükleyin ve ardından 'Sipariş Formunu Kaydet' butonuna basın.")
+    with st.form(f"siparis_formu_upload_{sec_index}"):
+        siparis_formu_file = st.file_uploader("Sipariş Formu PDF", type="pdf")
+        siparis_kaydet = st.form_submit_button("Sipariş Formunu Kaydet")
 
-                        if s_kaydet:
-                            if s_file is None:
-                                st.error("Sipariş formu yüklemelisiniz.")
-                            else:
-                                sname = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-                                tmp = os.path.join(".", sname)
-                                with open(tmp, "wb") as f: f.write(s_file.read())
-                                gg = drive.CreateFile({'title': sname, 'parents':[{'id': SIPARIS_FORMU_ID}]})
-                                gg.SetContentFile(tmp); gg.Upload()
-                                siparis_formu_url = f"https://drive.google.com/file/d/{gg['id']}/view?usp=sharing"
-                                try: os.remove(tmp)
-                                except: pass
-                                df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
-                                df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
-                                update_google_sheets()
-                                st.success("Sipariş formu yüklendi ve durum güncellendi!")
-                                st.rerun()
+    if siparis_kaydet:
+        if siparis_formu_file is None:
+            st.error("Sipariş formu yüklemelisiniz.")
+        else:
+            # Dosya ismi ve geçici kayıt
+            sname = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+            tmp_path = os.path.join(".", sname)
+            with open(tmp_path, "wb") as f:
+                f.write(siparis_formu_file.read())
+
+            try:
+                # Yeni helper ile Drive’a yükle
+                siparis_formu_url = upload_file_to_drive(SIPARIS_FORMU_ID, tmp_path, sname)
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except:
+                    pass
+
+            # Hem sipariş formu linkini hem de durumu güncelle
+            df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
+            df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
+            update_google_sheets()
+            st.success("Sipariş formu kaydedildi ve durum güncellendi!")
+            st.rerun()
 
                     # Diğer alanlar — güncelle
                     if guncelle:
