@@ -721,14 +721,17 @@ elif menu == "Proforma Takibi":
             df_proforma[col] = ""
 
     # Beklemede özet
-    beklemede = df_proforma[df_proforma["Durum"]=="Beklemede"]
+    beklemede = df_proforma[df_proforma["Durum"] == "Beklemede"]
     if not beklemede.empty:
         st.subheader("Bekleyen Proformalar")
-        st.dataframe(beklemede[["Müşteri Adı","Proforma No","Tarih","Tutar","Durum","Vade (gün)","Sevk Durumu"]],
-                     use_container_width=True)
+        st.dataframe(
+            beklemede[["Müşteri Adı", "Proforma No", "Tarih", "Tutar", "Durum", "Vade (gün)", "Sevk Durumu"]],
+            use_container_width=True
+        )
 
-    musteri_list = sorted([x for x in df_musteri["Müşteri Adı"].dropna().unique()
-                           if isinstance(x,str) and x.strip()!=""]) if not df_musteri.empty else []
+    musteri_list = sorted(
+        [x for x in df_musteri["Müşteri Adı"].dropna().unique() if isinstance(x, str) and x.strip() != ""]
+    ) if not df_musteri.empty else []
     musteri_sec = st.selectbox("Müşteri Seç", [""] + musteri_list)
 
     if musteri_sec:
@@ -736,7 +739,7 @@ elif menu == "Proforma Takibi":
 
         # --- YENİ KAYIT ---
         if islem == "Yeni Kayıt":
-            mi = df_musteri[df_musteri["Müşteri Adı"]==musteri_sec]
+            mi = df_musteri[df_musteri["Müşteri Adı"] == musteri_sec]
             def_ulke = mi["Ülke"].values[0] if not mi.empty else ""
             def_rep  = mi["Satış Temsilcisi"].values[0] if not mi.empty else ""
             def_pay  = mi["Ödeme Şekli"].values[0] if not mi.empty else ""
@@ -750,7 +753,7 @@ elif menu == "Proforma Takibi":
                 temsilci = st.text_input("Satış Temsilcisi", value=def_rep, disabled=True)
                 odeme = st.text_input("Ödeme Şekli", value=def_pay, disabled=True)
                 aciklama = st.text_area("Açıklama")
-                durum = st.selectbox("Durum", ["Beklemede","İptal","Faturası Kesildi","Siparişe Dönüştü"], index=0)
+                durum = st.selectbox("Durum", ["Beklemede", "İptal", "Faturası Kesildi", "Siparişe Dönüştü"], index=0)
                 pdf_file = st.file_uploader("Proforma PDF", type="pdf")
                 kaydet = st.form_submit_button("Kaydet")
 
@@ -759,21 +762,34 @@ elif menu == "Proforma Takibi":
                 if not proforma_no.strip() or not vade_gun.strip():
                     st.error("Proforma No ve Vade (gün) zorunlu!")
                 else:
-                    # Proforma PDF Google Drive
+                    # Proforma PDF -> Google Drive
                     if pdf_file:
                         fname = f"{musteri_sec}_{tarih}_{proforma_no}.pdf"
                         tmp = os.path.join(".", fname)
-                        with open(tmp, "wb") as f: f.write(pdf_file.read())
-                        g = drive.CreateFile({'title': fname, 'parents':[{'id': PROFORMA_PDF_ID}]})
-                        g.SetContentFile(tmp); g.Upload()
-                        pdf_link = f"https://drive.google.com/file/d/{g['id']}/view?usp=sharing"
-                        try: os.remove(tmp)
-                        except: pass
+                        with open(tmp, "wb") as f:
+                            f.write(pdf_file.read())
+                        try:
+                            pdf_link = upload_file_to_drive(PROFORMA_PDF_ID, tmp, fname)
+                        finally:
+                            try:
+                                os.remove(tmp)
+                            except:
+                                pass
 
                     new_row = {
-                        "Müşteri Adı": musteri_sec, "Tarih": tarih, "Proforma No": proforma_no, "Tutar": tutar,
-                        "Vade (gün)": vade_gun, "Ülke": def_ulke, "Satış Temsilcisi": def_rep, "Ödeme Şekli": def_pay,
-                        "Açıklama": aciklama, "Durum": "Beklemede", "PDF": pdf_link, "Sipariş Formu": "", "Sevk Durumu": ""
+                        "Müşteri Adı": musteri_sec,
+                        "Tarih": tarih,
+                        "Proforma No": proforma_no,
+                        "Tutar": tutar,
+                        "Vade (gün)": vade_gun,
+                        "Ülke": def_ulke,
+                        "Satış Temsilcisi": def_rep,
+                        "Ödeme Şekli": def_pay,
+                        "Açıklama": aciklama,
+                        "Durum": "Beklemede",        # sipariş formu ayrı adımda
+                        "PDF": pdf_link,
+                        "Sipariş Formu": "",
+                        "Sevk Durumu": ""
                     }
                     df_proforma = pd.concat([df_proforma, pd.DataFrame([new_row])], ignore_index=True)
                     update_google_sheets()
@@ -782,20 +798,26 @@ elif menu == "Proforma Takibi":
 
         # --- ESKİ KAYIT ---
         elif islem == "Eski Kayıt":
-            kayitlar = df_proforma[(df_proforma["Müşteri Adı"]==musteri_sec) & (df_proforma["Durum"]=="Beklemede")]
+            kayitlar = df_proforma[
+                (df_proforma["Müşteri Adı"] == musteri_sec) & (df_proforma["Durum"] == "Beklemede")
+            ]
             if kayitlar.empty:
                 st.info("Bu müşteriye ait bekleyen proforma yok.")
             else:
-                st.dataframe(kayitlar[["Müşteri Adı","Proforma No","Tarih","Tutar","Durum","Vade (gün)","Sevk Durumu"]],
-                             use_container_width=True)
+                st.dataframe(
+                    kayitlar[["Müşteri Adı", "Proforma No", "Tarih", "Tutar", "Durum", "Vade (gün)", "Sevk Durumu"]],
+                    use_container_width=True
+                )
 
-                sec_index = st.selectbox("Proforma Seç",
-                                         kayitlar.index,
-                                         format_func=lambda i: f"{kayitlar.at[i,'Proforma No']} | {kayitlar.at[i,'Tarih']}")
+                sec_index = st.selectbox(
+                    "Proforma Seç",
+                    kayitlar.index,
+                    format_func=lambda i: f"{kayitlar.at[i, 'Proforma No']} | {kayitlar.at[i, 'Tarih']}"
+                )
 
                 if sec_index is not None:
                     row = kayitlar.loc[sec_index]
-                    if str(row.get("PDF","")).strip():
+                    if str(row.get("PDF", "")).strip():
                         st.markdown(f"**Proforma PDF:** [{row['Proforma No']}]({row['PDF']})", unsafe_allow_html=True)
 
                     with st.form("edit_proforma"):
@@ -804,65 +826,66 @@ elif menu == "Proforma Takibi":
                         tutar_ = st.text_input("Tutar ($)", value=row["Tutar"])
                         vade_gun_ = st.text_input("Vade (gün)", value=str(row["Vade (gün)"]))
                         aciklama_ = st.text_area("Açıklama", value=row["Açıklama"])
-                        durum_ = st.selectbox("Durum",
-                                              ["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"],
-                                              index=["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"].index(row["Durum"])
-                                              if row["Durum"] in ["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"] else 0)
+                        durum_ = st.selectbox(
+                            "Durum",
+                            ["Beklemede", "Siparişe Dönüştü", "İptal", "Faturası Kesildi"],
+                            index=["Beklemede", "Siparişe Dönüştü", "İptal", "Faturası Kesildi"].index(row["Durum"])
+                            if row["Durum"] in ["Beklemede", "Siparişe Dönüştü", "İptal", "Faturası Kesildi"] else 0
+                        )
                         guncelle = st.form_submit_button("Güncelle")
                         sil = st.form_submit_button("Sil")
 
-                    # --- Siparişe Dönüştü ise ayrı form ---
-if durum_ == "Siparişe Dönüştü":
-    st.info("Lütfen sipariş formunu yükleyin ve ardından 'Sipariş Formunu Kaydet' butonuna basın.")
-    with st.form(f"siparis_formu_upload_{sec_index}"):
-        siparis_formu_file = st.file_uploader("Sipariş Formu PDF", type="pdf")
-        siparis_kaydet = st.form_submit_button("Sipariş Formunu Kaydet")
+                    # --- Siparişe Dönüştü ise SİPARİŞ FORMU yükleme ---
+                    if durum_ == "Siparişe Dönüştü":
+                        st.info("Lütfen sipariş formunu yükleyin ve ardından 'Sipariş Formunu Kaydet' butonuna basın.")
+                        with st.form(f"siparis_formu_upload_{sec_index}"):
+                            siparis_formu_file = st.file_uploader("Sipariş Formu PDF", type="pdf")
+                            siparis_kaydet = st.form_submit_button("Sipariş Formunu Kaydet")
 
-    if siparis_kaydet:
-        if siparis_formu_file is None:
-            st.error("Sipariş formu yüklemelisiniz.")
-        else:
-            # Dosya ismi ve geçici kayıt
-            sname = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-            tmp_path = os.path.join(".", sname)
-            with open(tmp_path, "wb") as f:
-                f.write(siparis_formu_file.read())
+                        if siparis_kaydet:
+                            if siparis_formu_file is None:
+                                st.error("Sipariş formu yüklemelisiniz.")
+                            else:
+                                sname = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+                                tmp_path = os.path.join(".", sname)
+                                with open(tmp_path, "wb") as f:
+                                    f.write(siparis_formu_file.read())
 
-            try:
-                # Yeni helper ile Drive’a yükle
-                siparis_formu_url = upload_file_to_drive(SIPARIS_FORMU_ID, tmp_path, sname)
-            finally:
-                try:
-                    os.remove(tmp_path)
-                except:
-                    pass
+                                try:
+                                    siparis_formu_url = upload_file_to_drive(SIPARIS_FORMU_ID, tmp_path, sname)
+                                finally:
+                                    try:
+                                        os.remove(tmp_path)
+                                    except:
+                                        pass
 
-            # Hem sipariş formu linkini hem de durumu güncelle
-df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
-df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
+                                # Link + Durum güncelle
+                                df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
+                                df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
+                                update_google_sheets()
+                                st.success("Sipariş formu kaydedildi ve durum güncellendi!")
+                                st.rerun()
 
-update_google_sheets()
-st.success("Sipariş formu kaydedildi ve durum güncellendi!")
-st.rerun()
-
-                    # Diğer alanlar — güncelle
+                    # --- Diğer alanlar — Güncelle ---
                     if guncelle:
-                        df_proforma.at[sec_index,"Tarih"] = tarih_
-                        df_proforma.at[sec_index,"Proforma No"] = proforma_no_
-                        df_proforma.at[sec_index,"Tutar"] = tutar_
-                        df_proforma.at[sec_index,"Vade (gün)"] = vade_gun_
-                        df_proforma.at[sec_index,"Açıklama"] = aciklama_
+                        df_proforma.at[sec_index, "Tarih"] = tarih_
+                        df_proforma.at[sec_index, "Proforma No"] = proforma_no_
+                        df_proforma.at[sec_index, "Tutar"] = tutar_
+                        df_proforma.at[sec_index, "Vade (gün)"] = vade_gun_
+                        df_proforma.at[sec_index, "Açıklama"] = aciklama_
                         if durum_ != "Siparişe Dönüştü":
-                            df_proforma.at[sec_index,"Durum"] = durum_
+                            df_proforma.at[sec_index, "Durum"] = durum_
                         update_google_sheets()
                         st.success("Proforma güncellendi!")
                         st.rerun()
 
+                    # --- Sil ---
                     if sil:
                         df_proforma = df_proforma.drop(sec_index).reset_index(drop=True)
                         update_google_sheets()
                         st.success("Kayıt silindi!")
                         st.rerun()
+
 
 # ==============================
 # 11) GÜNCEL SİPARİŞ DURUMU
