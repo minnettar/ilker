@@ -59,8 +59,7 @@ EVRAK_KLASOR_ID         = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file",
-    # İstersen: "https://www.googleapis.com/auth/drive"  # klasör izinleri/okuma için geniş kapsam
+    "https://www.googleapis.com/auth/drive"
 ]
 
 creds = service_account.Credentials.from_service_account_info(
