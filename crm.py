@@ -114,23 +114,45 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
 # 3b) SHEETS -> DATAFRAME YÜKLEME
 # ======================
 
-def load_sheet_as_df(sheet_name: str, expected_cols: list[str]) -> pd.DataFrame:
-    """Google Sheets'ten sayfayı okur, kolonları hizalar."""
+def load_sheet_as_df(sheet_name, columns):
     try:
-        resp = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_name).execute()
-        values = resp.get("values", [])
+        ws = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_name).execute()
+        values = ws.get("values", [])
         if not values:
-            return pd.DataFrame(columns=expected_cols)
-        df = pd.DataFrame(values[1:], columns=values[0])
-        # eksik kolonları tamamla
-        for c in expected_cols:
-            if c not in df.columns:
-                df[c] = ""
-        # fazlalık kolon varsa kalsın; yazarken expected'e göre yazarız
+            return pd.DataFrame(columns=columns)
+
+        header = values[0]
+        data_rows = values[1:]
+
+        # Başlığı istenmeyen boş/ek hücrelerden arındır
+        header = [h.strip() for h in header]
+        # Eğer başlık sayısı 2–100 arası ama "columns"tan farklıysa, "columns"u esas al
+        # (ETA gibi sayfalarda schema sabit kalsın)
+        if sheet_name == "ETA":
+            header = columns  # ETA için şemayı zorla
+
+        # Satırları başlık uzunluğuna pad/truncate et
+        H = len(header)
+        fixed_rows = []
+        for r in data_rows:
+            r = list(r)
+            if len(r) < H:
+                r = r + [""] * (H - len(r))
+            elif len(r) > H:
+                r = r[:H]
+            fixed_rows.append(r)
+
+        df = pd.DataFrame(fixed_rows, columns=header)
+
+        # Eksik sütunları yine de ekle (diğer sayfalar için)
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+
         return df
     except Exception as e:
-        st.warning(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
-        return pd.DataFrame(columns=expected_cols)
+        print(f"{sheet_name} sayfası yüklenirken hata: {e}")
+        return pd.DataFrame(columns=columns)
 
 # --- tüm sayfaları yükle ---
 df_musteri = load_sheet_as_df("Sayfa1", [
