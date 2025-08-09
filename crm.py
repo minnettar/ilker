@@ -10,6 +10,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 import numpy as np
+import smtplib
+from email.message import EmailMessage
 
 # ======================
 # 2) ÜLKE ve TEMSİLCİ LİSTELERİ
