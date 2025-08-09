@@ -1045,25 +1045,30 @@ elif menu == "Fatura & İhracat Evrakları":
 
         kaydet = st.form_submit_button("Kaydet")
 
-    if kaydet:
-        if not fatura_no.strip() or not tutar.strip():
-            st.error("Fatura No ve Tutar zorunlu!")
-        else:
-            file_urls = {}
-            for col,label in evrak_tipleri:
-                up = uploaded[col]
-                if up:
-                    fname = f"{col}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-                    tmp = os.path.join(".", fname)
-                    with open(tmp,"wb") as f: f.write(up.read())
-                    g = drive.CreateFile({'title': fname, 'parents':[{'id': EVRAK_KLASOR_ID}]})
-                    g.SetContentFile(tmp); g.Upload()
-                    file_urls[col] = upload_file_to_drive(EVRAK_KLASOR_ID, tmp, fname)
-                    try: os.remove(tmp)
-                    except: pass
-                else:
-                    file_urls[col] = onceki.iloc[0][col] if not onceki.empty else ""
+    # 12) FATURA & İHRACAT EVRAKLARI -> kaydet butonu altında
 
+if kaydet:
+    if not fatura_no.strip() or not tutar.strip():
+        st.error("Fatura No ve Tutar zorunlu!")
+    else:
+        file_urls = {}
+        for col, label in evrak_tipleri:
+            up = uploaded[col]
+            if up:
+                fname = f"{col}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+                tmp = os.path.join(".", fname)
+                with open(tmp, "wb") as f:
+                    f.write(up.read())
+                try:
+                    file_urls[col] = upload_file_to_drive(EVRAK_KLASOR_ID, tmp, fname)  # <-- helper
+                finally:
+                    try:
+                        os.remove(tmp)
+                    except:
+                        pass
+            else:
+                file_urls[col] = onceki.iloc[0][col] if not onceki.empty else ""
+        ...
             new_row = {
                 "Müşteri Adı": sec_mus, "Proforma No": sec_pf,
                 "Fatura No": fatura_no, "Fatura Tarihi": fatura_tarih, "Tutar": tutar,
