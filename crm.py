@@ -1058,7 +1058,7 @@ elif menu == "Fatura & İhracat Evrakları":
                     with open(tmp,"wb") as f: f.write(up.read())
                     g = drive.CreateFile({'title': fname, 'parents':[{'id': EVRAK_KLASOR_ID}]})
                     g.SetContentFile(tmp); g.Upload()
-                    file_urls[col] = f"https://drive.google.com/file/d/{g['id']}/view?usp=sharing"
+                    file_urls[col] = upload_file_to_drive(EVRAK_KLASOR_ID, tmp, fname)
                     try: os.remove(tmp)
                     except: pass
                 else:
