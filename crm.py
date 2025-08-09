@@ -1110,7 +1110,7 @@ if kaydet:
                         pass
             else:
                 file_urls[col] = onceki.iloc[0][col] if not onceki.empty else ""
-        ...
+            
             new_row = {
                 "Müşteri Adı": sec_mus, "Proforma No": sec_pf,
                 "Fatura No": fatura_no, "Fatura Tarihi": fatura_tarih, "Tutar": tutar,
