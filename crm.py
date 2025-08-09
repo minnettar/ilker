@@ -12,6 +12,7 @@ from google.oauth2 import service_account
 import numpy as np
 
 
+
 # ======================
 # 2) ÜLKE ve TEMSİLCİ LİSTELERİ
 # ======================
@@ -144,33 +145,19 @@ def _sanitize_filename(name: str) -> str:
 
 
 def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
-    """
-    Dosyayı Google Drive'a yükler ve paylaşılabilir görüntüleme linkini döner.
-    folder_id boş/None ise köke yükler.
-    """
-    safe_name = _sanitize_filename(filename)
-    mime = _guess_mime_by_ext(safe_name)
-    meta = {"name": safe_name}
-    if folder_id:
-        meta["parents"] = [folder_id]
-
-    media = MediaFileUpload(local_path, mimetype=mime, resumable=False)
-
-    created = drive_service.files().create(
-        body=meta, media_body=media, fields="id"
-    ).execute()
+    from googleapiclient.http import MediaFileUpload
+    meta = {"name": filename, "parents": [folder_id]} if folder_id else {"name": filename}
+    media = MediaFileUpload(local_path, mimetype="application/pdf", resumable=False)
+    created = drive_service.files().create(body=meta, media_body=media, fields="id").execute()
     fid = created["id"]
-
-    # Herkese görüntüleme izni (klasör zaten paylaşımlıysa sorun olmaz)
     try:
         drive_service.permissions().create(
             fileId=fid,
             body={"role": "reader", "type": "anyone"},
             fields="id"
         ).execute()
-    except Exception as e:
-        print(f"Drive permission set warning (fileId={fid}): {e}")
-
+    except Exception:
+        pass
     return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
 
 # ======================
