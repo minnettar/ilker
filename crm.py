@@ -163,16 +163,27 @@ def load_sheet_as_df(sheet_name, columns):
         if not values:
             return pd.DataFrame(columns=columns)
 
-        header = values[0]
+        header = [h.strip() for h in values[0]]
         data_rows = values[1:]
 
         # Sadece ETA’da şemayı sabitle
         if sheet_name == "ETA":
-            header = columns
+            header = columns[:]
 
-        df = pd.DataFrame(data_rows, columns=header)
+        # Satırları başlık uzunluğuna pad/truncate et
+        H = len(header)
+        fixed_rows = []
+        for r in data_rows:
+            r = list(r)
+            if len(r) < H:
+                r = r + [""] * (H - len(r))
+            elif len(r) > H:
+                r = r[:H]
+            fixed_rows.append(r)
 
-        # Eksik sütun varsa ekle (diğer sayfalarda kırılmaz)
+        df = pd.DataFrame(fixed_rows, columns=header)
+
+        # Eksik olması muhtemel kolonları yine de ekle
         for col in columns:
             if col not in df.columns:
                 df[col] = ""
