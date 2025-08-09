@@ -11,6 +11,7 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 import numpy as np
 
+
 # ======================
 # 2) ÜLKE ve TEMSİLCİ LİSTELERİ
 # ======================
@@ -52,7 +53,7 @@ SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
 FIYAT_TEKLIFI_ID        = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
 PROFORMA_PDF_KLASOR_ID  = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
-SIPARIS_FORMU_KLASOR_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
+SIPARIS_FORMU_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
 EVRAK_KLASOR_ID         = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
 
 SCOPES = [
