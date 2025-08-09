@@ -520,7 +520,7 @@ PROFORMA_PDF_ID    = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"   # <- daha önce kulla
 SIPARIS_FORMU_ID   = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"   # <- daha önce kullandığımız
 EVRAK_KLASOR_ID    = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"   # <- senin verdiğin
 
-elif menu == "Fiyat Teklifleri":
+if menu == "Fiyat Teklifleri":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Fiyat Teklifleri</h2>", unsafe_allow_html=True)
 
     # Teklif No oluşturucu
