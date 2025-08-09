@@ -136,21 +136,66 @@ def _sanitize_filename(name: str) -> str:
     keep = "-_.() "
     return "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))[:180]
 
+import json
+
 def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
-    from googleapiclient.http import MediaFileUpload
-    meta = {"name": filename, "parents": [folder_id]} if folder_id else {"name": filename}
-    media = MediaFileUpload(local_path, mimetype="application/pdf", resumable=False)
-    created = drive_service.files().create(body=meta, media_body=media, fields="id").execute()
-    fid = created["id"]
+    filename = _sanitize_filename(filename)
+    mime = _guess_mime_by_ext(filename)
+
+    # 1) Klasör var mı ve gerçekten klasör mü?
     try:
-        drive_service.permissions().create(
-            fileId=fid,
-            body={"role": "reader", "type": "anyone"},
-            fields="id"
+        meta_check = drive_service.files().get(
+            fileId=folder_id,
+            fields="id,name,mimeType,driveId",
+            supportsAllDrives=True
         ).execute()
-    except Exception:
-        pass
-    return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
+        if meta_check.get("mimeType") != "application/vnd.google-apps.folder":
+            raise RuntimeError(f"Verilen ID bir klasör değil: {meta_check.get('name')} ({meta_check.get('mimeType')})")
+    except Exception as e:
+        raise RuntimeError(f"Klasör ID doğrulanamadı: {folder_id} | Hata: {e}")
+
+    # 2) Yükleme
+    try:
+        meta = {"name": filename, "parents": [folder_id]}
+        media = MediaFileUpload(local_path, mimetype=mime, resumable=False)
+        created = drive_service.files().create(
+            body=meta,
+            media_body=media,
+            fields="id",
+            supportsAllDrives=True
+        ).execute()
+        fid = created["id"]
+
+        # 3) "Bağlantıya sahip olan herkes görüntülesin"
+        try:
+            drive_service.permissions().create(
+                fileId=fid,
+                body={"role": "reader", "type": "anyone"},
+                fields="id",
+                supportsAllDrives=True
+            ).execute()
+        except Exception:
+            pass
+
+        return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
+
+    except Exception as e:
+        # HttpError ise okunur hale getir
+        try:
+            from googleapiclient.errors import HttpError
+            if isinstance(e, HttpError):
+                try:
+                    err = json.loads(e.content.decode()).get("error", {})
+                    code = err.get("code")
+                    msg = err.get("message")
+                    reason = ", ".join([(x.get("reason") or "") for x in err.get("errors", []) if isinstance(x, dict)])
+                    raise RuntimeError(f"Drive yükleme hatası (code={code}, reason={reason}): {msg}")
+                except Exception:
+                    raise RuntimeError(f"Drive yükleme hatası: {e}")
+            else:
+                raise
+        except RuntimeError:
+            raise
 
 # ======================
 # 3b) SHEETS -> DATAFRAME YÜKLEME
