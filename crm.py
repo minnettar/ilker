@@ -594,29 +594,49 @@ if menu == "Fiyat Teklifleri":
 
     # Teklif No oluşturucu
     def otomatik_teklif_no():
-        if df_teklif.empty or "Teklif No" not in df_teklif.columns: return "TKF-0001"
-        mevcut = pd.to_numeric(df_teklif["Teklif No"].astype(str).str.extract(r"(\d+)$")[0], errors="coerce").dropna().astype(int)
+        if df_teklif.empty or "Teklif No" not in df_teklif.columns:
+            return "TKF-0001"
+        mevcut = pd.to_numeric(
+            df_teklif["Teklif No"].astype(str).str.extract(r"(\d+)$")[0],
+            errors="coerce"
+        ).dropna().astype(int)
         return f"TKF-{(mevcut.max()+1 if not mevcut.empty else 1):04d}"
 
     # Açık teklifler özeti
     goster = df_teklif.copy()
-    if not goster.empty and "Tarih" in goster:
+    if not goster.empty and "Tarih" in goster.columns:
         goster["Tarih"] = pd.to_datetime(goster["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-    acik = goster[goster.get("Durum","")=="Açık"].sort_values(["Müşteri Adı","Teklif No"])
-    toplam = pd.to_numeric(acik.get("Tutar", pd.Series(dtype=float)), errors="coerce").sum() if not acik.empty else 0
-    st.markdown(f"<div style='font-size:1.05em; color:#11998e; font-weight:bold;'>Toplam: {toplam:,.2f} $ | Açık Teklif: {len(acik)} adet</div>", unsafe_allow_html=True)
-    st.dataframe(acik[["Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama"]] if not acik.empty else pd.DataFrame(columns=["Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama"]), use_container_width=True)
 
-    col1,col2 = st.columns(2)
+    if "Durum" in goster.columns:
+        acik = goster[goster["Durum"] == "Açık"].sort_values(["Müşteri Adı","Teklif No"])
+    else:
+        acik = pd.DataFrame(columns=["Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama"])
+
+    toplam = pd.to_numeric(acik["Tutar"], errors="coerce").sum() if not acik.empty else 0
+    st.markdown(
+        f"<div style='font-size:1.05em; color:#11998e; font-weight:bold;'>Toplam: {toplam:,.2f} $ | Açık Teklif: {len(acik)} adet</div>",
+        unsafe_allow_html=True
+    )
+    st.dataframe(
+        acik[["Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama"]]
+        if not acik.empty else
+        pd.DataFrame(columns=["Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama"]),
+        use_container_width=True
+    )
+
+    col1, col2 = st.columns(2)
     with col1: yeni_btn = st.button("Yeni Teklif")
     with col2: eski_btn = st.button("Eski Teklif")
 
-    if "teklif_view" not in st.session_state: st.session_state.teklif_view=None
-    if yeni_btn: st.session_state.teklif_view="yeni"
-    if eski_btn: st.session_state.teklif_view="eski"
+    if "teklif_view" not in st.session_state:
+        st.session_state.teklif_view = None
+    if yeni_btn:
+        st.session_state.teklif_view = "yeni"
+    if eski_btn:
+        st.session_state.teklif_view = "eski"
 
     # Yeni Teklif
-    if st.session_state.teklif_view=="yeni":
+    if st.session_state.teklif_view == "yeni":
         must_list = [""] + sorted(df_musteri["Müşteri Adı"].dropna().unique().tolist())
         with st.form("add_teklif"):
             st.subheader("Yeni Teklif Ekle")
@@ -640,40 +660,61 @@ if menu == "Fiyat Teklifleri":
                     temiz_t = str(tarih).replace("-","")
                     fname = f"{temiz_m}__{temiz_t}__{teklif_no}.pdf"
                     tmp = os.path.join(".", fname)
-                    with open(tmp, "wb") as f: f.write(pdf.read())
-                    gfile = drive.CreateFile({'title': fname, 'parents':[{'id': FIYAT_TEKLIFI_ID}]})
-                    gfile.SetContentFile(tmp); gfile.Upload()
-                    pdf_link = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
-                    try: os.remove(tmp)
-                    except: pass
+                    with open(tmp, "wb") as f:
+                        f.write(pdf.read())
+
+                    # >>> PyDrive yerine ortak helper:
+                    pdf_link = upload_file_to_drive(
+                        FIYAT_TEKLIFI_ID,
+                        tmp,
+                        fname
+                    )
+                    try:
+                        os.remove(tmp)
+                    except Exception:
+                        pass
 
                 df_teklif = pd.concat([df_teklif, pd.DataFrame([{
-                    "Müşteri Adı": musteri_sec, "Tarih": tarih, "Teklif No": teklif_no, "Tutar": tutar,
-                    "Ürün/Hizmet": urun, "Açıklama": aciklama, "Durum": durum, "PDF": pdf_link
+                    "Müşteri Adı": musteri_sec,
+                    "Tarih": tarih,
+                    "Teklif No": teklif_no,
+                    "Tutar": tutar,
+                    "Ürün/Hizmet": urun,
+                    "Açıklama": aciklama,
+                    "Durum": durum,
+                    "PDF": pdf_link
                 }])], ignore_index=True)
+
                 update_google_sheets()
                 st.success("Teklif eklendi!")
-                st.session_state.teklif_view=None
+                st.session_state.teklif_view = None
                 st.rerun()
 
     # Eski Teklif
-    if st.session_state.teklif_view=="eski":
+    if st.session_state.teklif_view == "eski":
         st.subheader("Eski Teklifler")
         musteri_listesi = [""] + sorted(df_teklif["Müşteri Adı"].dropna().unique().tolist())
         sec_mus = st.selectbox("Müşteri Seç", musteri_listesi, key="eski_teklif_mus")
         if sec_mus:
-            tlf = df_teklif[df_teklif["Müşteri Adı"]==sec_mus].sort_values("Tarih", ascending=False)
+            tlf = df_teklif[df_teklif["Müşteri Adı"] == sec_mus].sort_values("Tarih", ascending=False)
             if tlf.empty:
                 st.info("Bu müşteriye ait teklif yok.")
             else:
-                sec_i = st.selectbox("Teklif Seç", tlf.index,
-                                     format_func=lambda i: f"{tlf.at[i,'Teklif No']} | {tlf.at[i,'Tarih']}")
+                sec_i = st.selectbox(
+                    "Teklif Seç",
+                    tlf.index,
+                    format_func=lambda i: f"{tlf.at[i,'Teklif No']} | {tlf.at[i,'Tarih']}"
+                )
                 kayit = tlf.loc[sec_i]
                 if str(kayit.get("PDF","")).strip():
                     st.markdown(f"**Teklif PDF:** [{kayit['Teklif No']}]({kayit['PDF']})", unsafe_allow_html=True)
                 st.table({
-                    "Müşteri Adı":[kayit["Müşteri Adı"]],"Tarih":[kayit["Tarih"]],"Teklif No":[kayit["Teklif No"]],
-                    "Tutar":[kayit["Tutar"]],"Ürün/Hizmet":[kayit["Ürün/Hizmet"]],"Açıklama":[kayit["Açıklama"]],
+                    "Müşteri Adı":[kayit["Müşteri Adı"]],
+                    "Tarih":[kayit["Tarih"]],
+                    "Teklif No":[kayit["Teklif No"]],
+                    "Tutar":[kayit["Tutar"]],
+                    "Ürün/Hizmet":[kayit["Ürün/Hizmet"]],
+                    "Açıklama":[kayit["Açıklama"]],
                     "Durum":[kayit["Durum"]]
                 })
 
