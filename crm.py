@@ -207,8 +207,7 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
         except Exception:
             detail = str(he)
         raise RuntimeError(f"Drive yükleme hatası (HTTP {code}): {detail}")
-
-    except Exception as e:
+        except Exception as e:
         raise RuntimeError(f"Drive yükleme hatası: {e}")
 
 # ======================
