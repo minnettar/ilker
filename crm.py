@@ -12,6 +12,8 @@ from google.oauth2 import service_account
 import numpy as np
 import smtplib
 from email.message import EmailMessage
+import json
+from googleapiclient.errors import HttpError
 
 # ======================
 # 2) ÜLKE ve TEMSİLCİ LİSTELERİ
@@ -48,7 +50,6 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 # ======================
 # 3) GOOGLE SHEETS & DRIVE BAĞLANTILARI
 # ======================
-from googleapiclient.http import MediaFileUpload
 
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 
@@ -136,63 +137,80 @@ def _sanitize_filename(name: str) -> str:
     keep = "-_.() "
     return "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))[:180]
 
-import json
-from googleapiclient.errors import HttpError
-
 def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
-    # 0) Güvenli ad + MIME (dosya uzantısından)
-    filename = _sanitize_filename(filename)
-    mime = _guess_mime_by_ext(os.path.splitext(filename)[1] and filename or local_path)
-
-    # 1) Klasör var mı ve gerçekten klasör mü?
+    """
+    Google Drive'a dosya yükler. Başarılıysa paylaşıma açık dosya linki döner.
+    Sorunlarda okunabilir hata verir.
+    """
+    from googleapiclient.errors import HttpError
     try:
-        meta_check = drive_service.files().get(
-            fileId=folder_id,
-            fields="id,name,mimeType,driveId",
-            supportsAllDrives=True
-        ).execute()
-        if meta_check.get("mimeType") != "application/vnd.google-apps.folder":
-            raise RuntimeError(f"Verilen ID klasör değil: {meta_check.get('name')} ({meta_check.get('mimeType')})")
-    except Exception as e:
-        raise RuntimeError(f"Klasör ID doğrulanamadı: {folder_id} | Hata: {e}")
+        # 0) Dosya var mı?
+        if not os.path.exists(local_path):
+            raise RuntimeError(f"Yüklenecek dosya bulunamadı: {local_path}")
 
-    # 2) Yükleme
-    try:
-        meta = {"name": filename, "parents": [folder_id]}
+        # 1) Klasör ID gerçekten klasör mü ve erişim var mı?
+        try:
+            folder_meta = drive_service.files().get(
+                fileId=folder_id,
+                fields="id,name,mimeType,owners(emailAddress,displayName)"
+            ).execute()
+        except HttpError as he:
+            # 404: ID hatalı / erişim yok. 403: erişim yok.
+            code = getattr(he, "status_code", None)
+            # bazı sürümlerde he.resp.status var:
+            if not code and hasattr(he, "resp") and hasattr(he.resp, "status"):
+                code = he.resp.status
+            # he.content -> bytes olabilir
+            detail = ""
+            try:
+                detail = he.content.decode("utf-8")
+            except Exception:
+                detail = str(he)
+            raise RuntimeError(f"Klasör doğrulanamadı (HTTP {code}). "
+                               f"FolderID: {folder_id}. Ayrıntı: {detail}")
+
+        if folder_meta.get("mimeType") != "application/vnd.google-apps.folder":
+            raise RuntimeError(f"Verilen ID bir klasör değil: {folder_meta.get('name')} ({folder_meta.get('mimeType')})")
+
+        # 2) Yükleme
+        mime = _guess_mime_by_ext(filename)
         media = MediaFileUpload(local_path, mimetype=mime, resumable=False)
+        meta = {"name": _sanitize_filename(filename), "parents": [folder_id]}
+
         created = drive_service.files().create(
             body=meta,
             media_body=media,
-            fields="id",
-            supportsAllDrives=True
+            fields="id"
         ).execute()
+
         fid = created["id"]
 
-        # 3) Herkese görüntüleme izni (politika izin veriyorsa)
+        # 3) Linki herkes görüntüleyebilir yap (başarısız olsa da dosya id dönsün)
         try:
             drive_service.permissions().create(
                 fileId=fid,
                 body={"role": "reader", "type": "anyone"},
-                fields="id",
-                supportsAllDrives=True
+                fields="id"
             ).execute()
-        except Exception:
+        except HttpError:
+            # paylaşıma açamıyorsak yine de dosyayı döndürürüz
             pass
 
         return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
 
-    except HttpError as e:
-        # Drive hatasını daha okunur göster
+    except HttpError as he:
+        code = getattr(he, "status_code", None)
+        if not code and hasattr(he, "resp") and hasattr(he.resp, "status"):
+            code = he.resp.status
+        detail = ""
         try:
-            err = json.loads(e.content.decode()).get("error", {})
-            code = err.get("code")
-            msg = err.get("message")
-            reason = ", ".join([(x.get("reason") or "") for x in err.get("errors", []) if isinstance(x, dict)])
-            raise RuntimeError(f"Drive yükleme hatası (code={code}, reason={reason}): {msg}")
+            detail = he.content.decode("utf-8")
         except Exception:
-            raise RuntimeError(f"Drive yükleme hatası: {e}")
+            detail = str(he)
+        raise RuntimeError(f"Drive yükleme hatası (HTTP {code}): {detail}")
+
     except Exception as e:
-        raise
+        raise RuntimeError(f"Drive yükleme hatası: {e}")
 
 # ======================
 # 3b) SHEETS -> DATAFRAME YÜKLEME
