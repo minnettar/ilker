@@ -53,7 +53,7 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 FIYAT_TEKLIFI_ID = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
-PROFORMA_PDF_KLASOR_ID = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
+PROFORMA_PDF_ID = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
 SIPARIS_FORMU_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
 EVRAK_KLASOR_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
 
@@ -243,7 +243,7 @@ df_teklif = load_sheet_as_df("Teklifler", [
 
 df_proforma = load_sheet_as_df("Proformalar", [
     "Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama",
-    "Durum","PDF","Sipariş Formu","Vade (gün)","Sevk Durumu",
+    "Durum","PDF"," Formu","Vade (gün)","Sevk Durumu",
     "Ülke","Satış Temsilcisi","Ödeme Şekli","Termin Tarihi",
     "Sevk Tarihi","Ulaşma Tarihi"
 ])
@@ -252,7 +252,7 @@ df_evrak = load_sheet_as_df("Evraklar", [
     "Müşteri Adı","Proforma No","Fatura No","Fatura Tarihi","Vade (gün)","Vade Tarihi","Tutar",
     "Ülke","Satış Temsilcisi","Ödeme Şekli",
     "Commercial Invoice","Sağlık Sertifikası","Packing List","Konşimento","İhracat Beyannamesi",
-    "Fatura PDF","Sipariş Formu","Yük Resimleri","EK Belgeler","Ödendi"
+    "Fatura PDF"," Formu","Yük Resimleri","EK Belgeler","Ödendi"
 ])
 
 df_eta = load_sheet_as_df("ETA", [
@@ -275,7 +275,7 @@ MENULER = [
     ("Görüşme / Arama / Ziyaret Kayıtları", "menu-gorusme", "☎️"),
     ("Fiyat Teklifleri", "menu-teklif", "💰"),
     ("Proforma Takibi", "menu-proforma", "📄"),
-    ("Güncel Sipariş Durumu", "menu-siparis", "🚚"),
+    ("Güncel  Durumu", "menu-", "🚚"),
     ("Fatura & İhracat Evrakları", "menu-evrak", "📑"),
     ("Vade Takibi", "menu-vade", "⏰"),
     ("ETA Takibi", "menu-eta", "🛳️"),
@@ -301,7 +301,7 @@ font-size:1.05em;font-weight:600;color:white;cursor:pointer;transition:filter .2
 .menu-gorusme {background: linear-gradient(90deg,#ff5e62,#ff9966);}
 .menu-teklif {background: linear-gradient(90deg,#8e54e9,#4776e6);}
 .menu-proforma {background: linear-gradient(90deg,#11998e,#38ef7d);}
-.menu-siparis {background: linear-gradient(90deg,#f7971e,#ffd200);}
+.menu- {background: linear-gradient(90deg,#f7971e,#ffd200);}
 .menu-evrak {background: linear-gradient(90deg,#f953c6,#b91d73);}
 .menu-vade {background: linear-gradient(90deg,#43e97b,#38f9d7);}
 .menu-eta {background: linear-gradient(90deg,#f857a6,#ff5858);}
@@ -349,16 +349,16 @@ if menu == "Özet Ekran":
         use_container_width=True
     )
 
-    # --- Siparişe Dönüşen (Sevk Bekleyen) ---
-    st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
+    # --- e Dönüşen (Sevk Bekleyen) ---
+    st.markdown("### 🚚 e Dönüşen (Sevk Bekleyen) ler")
     for c in ["Sevk Durumu","Termin Tarihi","Satış Temsilcisi","Ödeme Şekli","Ülke"]: 
         if c not in df_proforma.columns: df_proforma[c] = ""
-    siparisler = df_proforma[(df_proforma["Durum"] == "Siparişe Dönüştü") & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi","Ulaşıldı"]))].copy()
-    siparisler["Termin Tarihi Order"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce")
-    siparisler = siparisler.sort_values("Termin Tarihi Order", ascending=True)
-    if not siparisler.empty:
-        siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-        siparisler["Termin Tarihi"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+    ler = df_proforma[(df_proforma["Durum"] == "e Dönüştü") & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi","Ulaşıldı"]))].copy()
+    ler["Termin Tarihi Order"] = pd.to_datetime(ler["Termin Tarihi"], errors="coerce")
+    ler = ler.sort_values("Termin Tarihi Order", ascending=True)
+    if not ler.empty:
+        ler["Tarih"] = pd.to_datetime(ler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+        ler["Termin Tarihi"] = pd.to_datetime(ler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
     st.dataframe(
         siparisler[["Tarih","Müşteri Adı","Termin Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli","Proforma No","Tutar","Açıklama"]] if not siparisler.empty else pd.DataFrame(columns=["Tarih","Müşteri Adı","Termin Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli","Proforma No","Tutar","Açıklama"]),
         use_container_width=True
@@ -607,11 +607,6 @@ elif menu == "Görüşme / Arama / Ziyaret Kayıtları":
 # ======================
 # 9) FİYAT TEKLİFLERİ
 # ======================
-
-FIYAT_TEKLIFI_ID   = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"   # <- senin verdiğin
-PROFORMA_PDF_ID    = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"   # <- daha önce kullandığımız
-SIPARIS_FORMU_ID   = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"   # <- daha önce kullandığımız
-EVRAK_KLASOR_ID    = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"   # <- senin verdiğin
 
 if menu == "Fiyat Teklifleri":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Fiyat Teklifleri</h2>", unsafe_allow_html=True)
