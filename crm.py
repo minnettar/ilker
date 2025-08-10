@@ -349,34 +349,33 @@ if menu == "Özet Ekran":
         use_container_width=True
     )
 
-    # --- Siparişe Dönüşen (Sevk Bekleyen) ---
-st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
+        # --- Siparişe Dönüşen (Sevk Bekleyen) ---
+    st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
 
-# Gerekli kolonları garanti et
-for c in ["Sevk Durumu","Termin Tarihi","Satış Temsilcisi","Ödeme Şekli","Ülke","Proforma No","Tutar","Açıklama","Tarih"]:
-    if c not in df_proforma.columns:
-        df_proforma[c] = ""
+    # Gerekli kolonları garanti et
+    for c in ["Sevk Durumu","Termin Tarihi","Satış Temsilcisi","Ödeme Şekli","Ülke","Proforma No","Tutar","Açıklama","Tarih"]:
+        if c not in df_proforma.columns:
+            df_proforma[c] = ""
 
-siparisler = df_proforma[
-    (df_proforma["Durum"] == "Siparişe Dönüştü")
-    & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi","Ulaşıldı"]))
-].copy()
+    siparisler = df_proforma[
+        (df_proforma["Durum"] == "Siparişe Dönüştü")
+        & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi","Ulaşıldı"]))
+    ].copy()
 
-siparisler["Termin Tarihi Order"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce")
-siparisler = siparisler.sort_values("Termin Tarihi Order", ascending=True)
+    siparisler["Termin Tarihi Order"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce")
+    siparisler = siparisler.sort_values("Termin Tarihi Order", ascending=True)
 
-if not siparisler.empty:
-    siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-    siparisler["Termin Tarihi"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+    if not siparisler.empty:
+        siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+        siparisler["Termin Tarihi"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
 
-cols = ["Tarih","Müşteri Adı","Termin Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli","Proforma No","Tutar","Açıklama"]
-# Eksikse boş kolon ekle (indexlemeden önce)
-for c in cols:
-    if c not in siparisler.columns:
-        siparisler[c] = ""
+    cols = ["Tarih","Müşteri Adı","Termin Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli","Proforma No","Tutar","Açıklama"]
+    for c in cols:
+        if c not in siparisler.columns:
+            siparisler[c] = ""
 
-view_df = siparisler[cols] if not siparisler.empty else pd.DataFrame(columns=cols)
-st.dataframe(view_df, use_container_width=True)
+    view_df = siparisler[cols] if not siparisler.empty else pd.DataFrame(columns=cols)
+    st.dataframe(view_df, use_container_width=True)
 
     # --- Son Teslim Edilen 5 Sipariş ---
     st.markdown("### ✅ Son Teslim Edilen (Ulaşıldı) 5 Sipariş")
