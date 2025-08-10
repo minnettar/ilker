@@ -52,15 +52,14 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 # ======================
 
 SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
-
-FIYAT_TEKLIFI_ID        = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
-PROFORMA_PDF_KLASOR_ID  = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
+FIYAT_TEKLIFI_ID = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
+PROFORMA_PDF_KLASOR_ID = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
 SIPARIS_FORMU_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
-EVRAK_KLASOR_ID         = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
+EVRAK_KLASOR_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/drive.file"
 ]
 
 creds = service_account.Credentials.from_service_account_info(
