@@ -377,7 +377,6 @@ for c in cols:
 
 view_df = siparisler[cols] if not siparisler.empty else pd.DataFrame(columns=cols)
 st.dataframe(view_df, use_container_width=True)
-    )
 
     # --- Son Teslim Edilen 5 Sipariş ---
     st.markdown("### ✅ Son Teslim Edilen (Ulaşıldı) 5 Sipariş")
