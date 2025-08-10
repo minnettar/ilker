@@ -1041,6 +1041,13 @@ elif menu == "Fatura & İhracat Evrakları":
     rep  = mi["Satış Temsilcisi"].values[0] if not mi.empty else ""
     pay  = mi["Ödeme Şekli"].values[0] if not mi.empty else ""
 
+    # 1) Müşteri seçimi
+sec_mus = st.selectbox("Müşteri Seçin", sorted(df_musteri["Müşteri Adı"].unique()))
+
+# 2) Bu müşteriye ait proforma numaraları
+proformalar = df_proforma[df_proforma["Müşteri Adı"] == sec_mus]["Proforma No"].unique()
+sec_pf = st.selectbox("Proforma No Seçin", sorted(proformalar))
+
     # Önceki evraklar
     onceki = df_evrak[(df_evrak["Müşteri Adı"]==sec_mus) & (df_evrak["Proforma No"]==sec_pf)]
 
