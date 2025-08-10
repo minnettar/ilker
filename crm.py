@@ -349,31 +349,34 @@ if menu == "Özet Ekran":
         use_container_width=True
     )
 
-    # --- e Dönüşen (Sevk Bekleyen) ---
-    st.markdown("### 🚚 e Dönüşen (Sevk Bekleyen) ler")
-    for c in ["Sevk Durumu","Termin Tarihi","Satış Temsilcisi","Ödeme Şekli","Ülke"]: 
-        if c not in df_proforma.columns: df_proforma[c] = ""
-    ler = df_proforma[(df_proforma["Durum"] == "e Dönüştü") & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi","Ulaşıldı"]))].copy()
-    ler["Termin Tarihi Order"] = pd.to_datetime(ler["Termin Tarihi"], errors="coerce")
-    ler = ler.sort_values("Termin Tarihi Order", ascending=True)
-    if not ler.empty:
-        ler["Tarih"] = pd.to_datetime(ler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-        ler["Termin Tarihi"] = pd.to_datetime(ler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
-    st.dataframe(
-        siparisler[["Tarih","Müşteri Adı","Termin Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli","Proforma No","Tutar","Açıklama"]] if not siparisler.empty else pd.DataFrame(columns=["Tarih","Müşteri Adı","Termin Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli","Proforma No","Tutar","Açıklama"]),
-        use_container_width=True
-    )
-    toplam_bekleyen_sevk = pd.to_numeric(siparisler.get("Tutar", pd.Series(dtype=float)), errors="coerce").sum() if not siparisler.empty else 0
-    st.markdown(f"<div style='color:#219A41; font-weight:bold;'>*Toplam Bekleyen Sevk: {toplam_bekleyen_sevk:,.2f} $*</div>", unsafe_allow_html=True)
+    # --- Siparişe Dönüşen (Sevk Bekleyen) ---
+st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
 
-    # --- Yolda Olan (ETA) ---
-    st.markdown("### ⏳ Yolda Olan (ETA Takibi) Siparişler")
-    eta_yolda = df_proforma[(df_proforma.get("Sevk Durumu","") == "Sevkedildi") & (df_proforma.get("Sevk Durumu","") != "Ulaşıldı")].copy()
-    toplam_eta = pd.to_numeric(eta_yolda.get("Tutar", pd.Series(dtype=float)), errors="coerce").sum() if not eta_yolda.empty else 0
-    st.markdown(f"<div style='font-size:1.1em; color:#c471f5; font-weight:bold;'>Toplam: {toplam_eta:,.2f} $</div>", unsafe_allow_html=True)
-    st.dataframe(
-        eta_yolda[["Müşteri Adı","Ülke","Proforma No","Tarih","Tutar","Termin Tarihi","Açıklama"]] if not eta_yolda.empty else pd.DataFrame(columns=["Müşteri Adı","Ülke","Proforma No","Tarih","Tutar","Termin Tarihi","Açıklama"]),
-        use_container_width=True
+# Gerekli kolonları garanti et
+for c in ["Sevk Durumu","Termin Tarihi","Satış Temsilcisi","Ödeme Şekli","Ülke","Proforma No","Tutar","Açıklama","Tarih"]:
+    if c not in df_proforma.columns:
+        df_proforma[c] = ""
+
+siparisler = df_proforma[
+    (df_proforma["Durum"] == "Siparişe Dönüştü")
+    & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi","Ulaşıldı"]))
+].copy()
+
+siparisler["Termin Tarihi Order"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce")
+siparisler = siparisler.sort_values("Termin Tarihi Order", ascending=True)
+
+if not siparisler.empty:
+    siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+    siparisler["Termin Tarihi"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+
+cols = ["Tarih","Müşteri Adı","Termin Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli","Proforma No","Tutar","Açıklama"]
+# Eksikse boş kolon ekle (indexlemeden önce)
+for c in cols:
+    if c not in siparisler.columns:
+        siparisler[c] = ""
+
+view_df = siparisler[cols] if not siparisler.empty else pd.DataFrame(columns=cols)
+st.dataframe(view_df, use_container_width=True)
     )
 
     # --- Son Teslim Edilen 5 Sipariş ---
