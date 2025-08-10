@@ -947,7 +947,7 @@ elif menu == "Proforma Takibi":
                         update_google_sheets()
                         st.success("Kayıt silindi!")
                         st.rerun()
-
+                        
 # ==============================
 # 11) GÜNCEL SİPARİŞ DURUMU
 # ==============================
