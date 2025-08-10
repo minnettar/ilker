@@ -1089,20 +1089,71 @@ elif menu == "Fatura & İhracat Evrakları":
 
     # 12) FATURA & İHRACAT EVRAKLARI -> kaydet butonu altında
 
+# Önceki evraklar
+onceki = df_evrak[(df_evrak["Müşteri Adı"]==sec_mus) & (df_evrak["Proforma No"]==sec_pf)]
+
+def prev_html(label, url):
+    return (f'<div style="margin-top:-6px;"><a href="{url}" target="_blank" style="color:#219A41;">[Eski {label}]</a></div>'
+            if url else '<div style="margin-top:-6px; color:#b00020; font-size:0.95em;">(Daha önce yüklenmemiş)</div>')
+
+evrak_tipleri = [
+    ("Commercial Invoice", "Commercial Invoice PDF"),
+    ("Sağlık Sertifikası", "Sağlık Sertifikası PDF"),
+    ("Packing List", "Packing List PDF"),
+    ("Konşimento", "Konşimento PDF"),
+    ("İhracat Beyannamesi", "İhracat Beyannamesi PDF"),
+]
+
+# >>> ÖNEMLİ: formdan önce default'lar
+uploaded = {}
+kaydet = False
+
+with st.form("add_evrak"):
+    fatura_no = st.text_input("Fatura No")
+    fatura_tarih = st.date_input("Fatura Tarihi", value=datetime.date.today())
+    tutar = st.text_input("Fatura Tutarı ($)")
+
+    vade_gun = ""
+    vade_tarih = ""
+    pf_row = df_proforma[(df_proforma["Müşteri Adı"]==sec_mus) & (df_proforma["Proforma No"]==sec_pf)]
+    if not pf_row.empty:
+        vade_gun = pf_row.iloc[0].get("Vade (gün)","")
+        try:
+            vade_tarih = fatura_tarih + datetime.timedelta(days=int(vade_gun))
+        except:
+            vade_tarih = ""
+
+    st.text_input("Vade (gün)", value=vade_gun, disabled=True)
+    st.date_input("Vade Tarihi", value=vade_tarih if vade_tarih else fatura_tarih, disabled=True)
+
+    st.text_input("Ülke", value=ulke, disabled=True)
+    st.text_input("Satış Temsilcisi", value=rep, disabled=True)
+    st.text_input("Ödeme Şekli", value=pay, disabled=True)
+
+    # Upload alanları + önceki linkler
+    for col, label in evrak_tipleri:
+        uploaded[col] = st.file_uploader(label, type="pdf", key=f"{col}_upload")
+        prev_url = onceki.iloc[0][col] if not onceki.empty else ""
+        st.markdown(prev_html(label, prev_url), unsafe_allow_html=True)
+
+    kaydet = st.form_submit_button("Kaydet")
+
+# >>> İŞLEME: formdan sonra, tek yerde
 if kaydet:
     if not fatura_no.strip() or not tutar.strip():
         st.error("Fatura No ve Tutar zorunlu!")
     else:
+        # Dosyaları Drive'a yükle (varsa)
         file_urls = {}
-        for col, label in evrak_tipleri:
-            up = uploaded[col]
+        for col, _label in evrak_tipleri:
+            up = uploaded.get(col)
             if up:
                 fname = f"{col}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
                 tmp = os.path.join(".", fname)
                 with open(tmp, "wb") as f:
                     f.write(up.read())
                 try:
-                    file_urls[col] = upload_file_to_drive(EVRAK_KLASOR_ID, tmp, fname)  # <-- helper
+                    file_urls[col] = upload_file_to_drive(EVRAK_KLASOR_ID, tmp, fname)
                 finally:
                     try:
                         os.remove(tmp)
@@ -1110,23 +1161,25 @@ if kaydet:
                         pass
             else:
                 file_urls[col] = onceki.iloc[0][col] if not onceki.empty else ""
-            
-            new_row = {
-                "Müşteri Adı": sec_mus, "Proforma No": sec_pf,
-                "Fatura No": fatura_no, "Fatura Tarihi": fatura_tarih, "Tutar": tutar,
-                "Vade (gün)": vade_gun, "Vade Tarihi": vade_tarih,
-                "Ülke": ulke, "Satış Temsilcisi": rep, "Ödeme Şekli": pay,
-                "Commercial Invoice": file_urls.get("Commercial Invoice",""),
-                "Sağlık Sertifikası": file_urls.get("Sağlık Sertifikası",""),
-                "Packing List": file_urls.get("Packing List",""),
-                "Konşimento": file_urls.get("Konşimento",""),
-                "İhracat Beyannamesi": file_urls.get("İhracat Beyannamesi",""),
-                "Fatura PDF": "", "Sipariş Formu": "", "Yük Resimleri":"", "EK Belgeler":"", "Ödendi": False
-            }
-            df_evrak = pd.concat([df_evrak, pd.DataFrame([new_row])], ignore_index=True)
-            update_google_sheets()
-            st.success("Evraklar kaydedildi!")
-            st.rerun()
+
+        # >>> new_row döngünün DIŞINDA
+        new_row = {
+            "Müşteri Adı": sec_mus, "Proforma No": sec_pf,
+            "Fatura No": fatura_no, "Fatura Tarihi": fatura_tarih, "Tutar": tutar,
+            "Vade (gün)": vade_gun, "Vade Tarihi": vade_tarih,
+            "Ülke": ulke, "Satış Temsilcisi": rep, "Ödeme Şekli": pay,
+            "Commercial Invoice": file_urls.get("Commercial Invoice",""),
+            "Sağlık Sertifikası": file_urls.get("Sağlık Sertifikası",""),
+            "Packing List": file_urls.get("Packing List",""),
+            "Konşimento": file_urls.get("Konşimento",""),
+            "İhracat Beyannamesi": file_urls.get("İhracat Beyannamesi",""),
+            "Fatura PDF": "", "Sipariş Formu": "", "Yük Resimleri":"", "EK Belgeler":"", "Ödendi": False
+        }
+
+        df_evrak = pd.concat([df_evrak, pd.DataFrame([new_row])], ignore_index=True)
+        update_google_sheets()
+        st.success("Evraklar kaydedildi!")
+        st.rerun()
 
 # ======================
 # 13) VADE TAKİBİ
