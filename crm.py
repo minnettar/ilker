@@ -137,52 +137,60 @@ def _sanitize_filename(name: str) -> str:
     return "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))[:180]
 
 def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
-    mime = _guess_mime_by_ext(filename)
+    from googleapiclient.errors import HttpError
+    from googleapiclient.http import MediaFileUpload
+
+    filename = filename.strip()
+    folder_id = folder_id.strip()
+
+    mime = _guess_mime_by_ext(filename)  # pdf jpg vs.
+    media = MediaFileUpload(local_path, mimetype=mime, resumable=False)
+
     meta = {"name": filename}
     if folder_id:
         meta["parents"] = [folder_id]
 
-    media = MediaFileUpload(local_path, mimetype=mime, resumable=False)
-
     try:
         created = drive_service.files().create(
-            body=meta, media_body=media, fields="id"
+            body=meta,
+            media_body=media,
+            fields="id",
+            supportsAllDrives=True  # <- Paylaşılan Sürücü desteği
         ).execute()
         fid = created["id"]
-    except HttpError as he:
-        # HTTP kodu
-        status = getattr(getattr(he, "resp", None), "status", None) or "?"
-        # JSON hata gövdesini çöz
-        detail = None
+
+        # Linki herkese açmaya çalış (başarısız olsa da sorun değil)
         try:
-            payload = json.loads(getattr(he, "content", b"").decode("utf-8"))
-            err = payload.get("error", {})
-            detail = err.get("message") or (
-                err.get("errors", [{}])[0].get("reason")
-            )
+            drive_service.permissions().create(
+                fileId=fid,
+                body={"role": "reader", "type": "anyone"},
+                fields="id"
+            ).execute()
         except Exception:
             pass
-        msg = f"Drive yükleme hatası (HTTP {status})"
-        if detail:
-            msg += f": {detail}"
-        msg += f" | folder_id={folder_id} | name={filename}"
+
+        return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
+
+    except HttpError as he:
+        code = getattr(he, "status_code", None) or getattr(getattr(he, "resp", None), "status", "unknown")
+        detail = ""
+        try:
+            # he.content bytes -> str
+            detail = he.content.decode() if hasattr(he, "content") and he.content else str(he)
+        except Exception:
+            detail = str(he)
+
+        # Hızlı ipucu üretelim
+        tips = []
+        if code in (403, 404):
+            tips.append("• Klasör ID’si doğru mu ve servis hesabıyla paylaşıldı mı?")
+            tips.append("• Klasör bir Paylaşılan Sürücüdeyse supportsAllDrives=True ekli mi? (eklendi)")
+            tips.append("• SCOPES içinde 'https://www.googleapis.com/auth/drive' kullanmayı deneyin.")
+        if code == 400:
+            tips.append("• 'parents' alanındaki ID gerçekten bir klasör mü? (Dosya ID’si olmasın)")
+
+        msg = f"Drive yükleme hatası (HTTP {code}). Ayrıntı: {detail}\n" + ("\n".join(tips) if tips else "")
         raise RuntimeError(msg) from he
-
-    except Exception as e:
-        # Diğer beklenmeyen hatalar
-        raise RuntimeError(
-            f"Drive yükleme hatası: {e} | folder_id={folder_id} | name={filename}"
-        ) from e
-
-    # Paylaşımı herkese açık yapmayı dene (başarısız olursa akışı bozma)
-    try:
-        drive_service.permissions().create(
-            fileId=fid, body={"role": "reader", "type": "anyone"}, fields="id"
-        ).execute()
-    except Exception:
-        pass
-
-    return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
 
 # ======================
 # 3b) SHEETS -> DATAFRAME YÜKLEME
