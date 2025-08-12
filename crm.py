@@ -1,190 +1,276 @@
-import streamlit as st
+# ======================
+# 1) IMPORTLAR VE AYARLAR
+# ======================
+import os
+import io
+import datetime
 import pandas as pd
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-import io, os, datetime, tempfile, re, json
+import streamlit as st
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.oauth2 import service_account
 import numpy as np
 import smtplib
 from email.message import EmailMessage
+import json
+from googleapiclient.errors import HttpError
 
-st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
-
-# ==== KULLANICI GİRİŞİ SİSTEMİ ====
-USERS = {
-    "export1": "Seker12345!",
-    "admin": "Seker12345!",
-    "Boss": "Seker12345!",
-}
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-def login_screen():
-    st.title("ŞEKEROĞLU CRM - Giriş Ekranı")
-    username = st.text_input("Kullanıcı Adı")
-    password = st.text_input("Şifre", type="password")
-    if st.button("Giriş Yap"):
-        if username in USERS and password == USERS[username]:
-            st.session_state.user = username
-            st.success("Giriş başarılı!")
-            st.rerun()
-        else:
-            st.error("Kullanıcı adı veya şifre hatalı.")
-
-if not st.session_state.user:
-    login_screen()
-    st.stop()
-
-# Sol menüde çıkış
-if st.sidebar.button("Çıkış Yap"):
-    st.session_state.user = None
-    st.rerun()
-
-# --- Referans listeler ---
+# ======================
+# 2) ÜLKE ve TEMSİLCİ LİSTELERİ
+# ======================
 ulke_listesi = sorted([
-    "Afganistan","Almanya","Amerika Birleşik Devletleri","Andorra","Angola","Antigua ve Barbuda","Arjantin",
-    "Arnavutluk","Avustralya","Avusturya","Azerbaycan","Bahamalar","Bahreyn","Bangladeş","Barbados","Belçika",
-    "Belize","Benin","Beyaz Rusya","Bhutan","Birleşik Arap Emirlikleri","Birleşik Krallık","Bolivya",
-    "Bosna-Hersek","Botsvana","Brezilya","Brunei","Bulgaristan","Burkina Faso","Burundi","Butan",
-    "Cezayir","Çad","Çekya","Çin","Danimarka","Doğu Timor","Dominik Cumhuriyeti","Dominika","Ekvador",
-    "Ekvator Ginesi","El Salvador","Endonezya","Eritre","Ermenistan","Estonya","Etiyopya","Fas",
-    "Fiji","Fildişi Sahili","Filipinler","Filistin","Finlandiya","Fransa","Gabon","Gambia",
-    "Gana","Gine","Gine-Bissau","Grenada","Guatemala","Guyana","Güney Afrika","Güney Kore",
-    "Güney Sudan","Gürcistan","Haiti","Hindistan","Hırvatistan","Hollanda","Honduras","Hong Kong",
-    "Irak","İran","İrlanda","İspanya","İsrail","İsveç","İsviçre","İtalya","İzlanda","Jamaika",
-    "Japonya","Kamboçya","Kamerun","Kanada","Karadağ","Katar","Kazakistan","Kenya","Kırgızistan",
-    "Kiribati","Kolombiya","Komorlar","Kongo","Kongo Demokratik Cumhuriyeti","Kostarika","Küba",
-    "Kuveyt","Kuzey Kore","Kuzey Makedonya","Laos","Lesotho","Letonya","Liberya","Libya",
-    "Liechtenstein","Litvanya","Lübnan","Lüksemburg","Macaristan","Madagaskar","Malavi","Maldivler",
-    "Malezya","Mali","Malta","Marshall Adaları","Meksika","Mısır","Mikronezya","Moğolistan","Moldova",
-    "Monako","Morityus","Mozambik","Myanmar","Namibya","Nauru","Nepal","Nijer","Nijerya",
-    "Nikaragua","Norveç","Orta Afrika Cumhuriyeti","Özbekistan","Pakistan","Palau","Panama","Papua Yeni Gine",
-    "Paraguay","Peru","Polonya","Portekiz","Romanya","Ruanda","Rusya","Saint Kitts ve Nevis",
-    "Saint Lucia","Saint Vincent ve Grenadinler","Samoa","San Marino","Sao Tome ve Principe","Senegal",
-    "Seyşeller","Sırbistan","Sierra Leone","Singapur","Slovakya","Slovenya","Solomon Adaları","Somali",
-    "Sri Lanka","Sudan","Surinam","Suriye","Suudi Arabistan","Svaziland","Şili","Tacikistan","Tanzanya",
-    "Tayland","Tayvan","Togo","Tonga","Trinidad ve Tobago","Tunus","Tuvalu","Türkiye","Türkmenistan",
-    "Uganda","Ukrayna","Umman","Uruguay","Ürdün","Vanuatu","Vatikan","Venezuela","Vietnam",
-    "Yemen","Yeni Zelanda","Yunanistan","Zambiya","Zimbabve"
+    "Afganistan", "Almanya", "Amerika Birleşik Devletleri", "Andorra", "Angola", "Antigua ve Barbuda", "Arjantin",
+    "Arnavutluk", "Avustralya", "Avusturya", "Azerbaycan", "Bahamalar", "Bahreyn", "Bangladeş", "Barbados", "Belçika",
+    "Belize", "Benin", "Beyaz Rusya", "Bhutan", "Birleşik Arap Emirlikleri", "Birleşik Krallık", "Bolivya",
+    "Bosna-Hersek", "Botsvana", "Brezilya", "Brunei", "Bulgaristan", "Burkina Faso", "Burundi", "Butan",
+    "Cezayir", "Çad", "Çekya", "Çin", "Danimarka", "Doğu Timor", "Dominik Cumhuriyeti", "Dominika", "Ekvador",
+    "Ekvator Ginesi", "El Salvador", "Endonezya", "Eritre", "Ermenistan", "Estonya", "Etiyopya", "Fas",
+    "Fiji", "Fildişi Sahili", "Filipinler", "Filistin", "Finlandiya", "Fransa", "Gabon", "Gambia",
+    "Gana", "Gine", "Gine-Bissau", "Grenada", "Guatemala", "Guyana", "Güney Afrika", "Güney Kore",
+    "Güney Sudan", "Gürcistan", "Haiti", "Hindistan", "Hırvatistan", "Hollanda", "Honduras", "Hong Kong",
+    "Irak", "İran", "İrlanda", "İspanya", "İsrail", "İsveç", "İsviçre", "İtalya", "İzlanda", "Jamaika",
+    "Japonya", "Kamboçya", "Kamerun", "Kanada", "Karadağ", "Katar", "Kazakistan", "Kenya", "Kırgızistan",
+    "Kiribati", "Kolombiya", "Komorlar", "Kongo", "Kongo Demokratik Cumhuriyeti", "Kostarika", "Küba",
+    "Kuveyt", "Kuzey Kore", "Kuzey Makedonya", "Laos", "Lesotho", "Letonya", "Liberya", "Libya",
+    "Liechtenstein", "Litvanya", "Lübnan", "Lüksemburg", "Macaristan", "Madagaskar", "Malavi", "Maldivler",
+    "Malezya", "Mali", "Malta", "Marshall Adaları", "Meksika", "Mısır", "Mikronezya", "Moğolistan", "Moldova",
+    "Monako", "Morityus", "Mozambik", "Myanmar", "Namibya", "Nauru", "Nepal", "Nijer", "Nijerya",
+    "Nikaragua", "Norveç", "Orta Afrika Cumhuriyeti", "Özbekistan", "Pakistan", "Palau", "Panama", "Papua Yeni Gine",
+    "Paraguay", "Peru", "Polonya", "Portekiz", "Romanya", "Ruanda", "Rusya", "Saint Kitts ve Nevis",
+    "Saint Lucia", "Saint Vincent ve Grenadinler", "Samoa", "San Marino", "Sao Tome ve Principe", "Senegal",
+    "Seyşeller", "Sırbistan", "Sierra Leone", "Singapur", "Slovakya", "Slovenya", "Solomon Adaları", "Somali",
+    "Sri Lanka", "Sudan", "Surinam", "Suriye", "Suudi Arabistan", "Svaziland", "Şili", "Tacikistan", "Tanzanya",
+    "Tayland", "Tayvan", "Togo", "Tonga", "Trinidad ve Tobago", "Tunus", "Tuvalu", "Türkiye", "Türkmenistan",
+    "Uganda", "Ukrayna", "Umman", "Uruguay", "Ürdün", "Vanuatu", "Vatikan", "Venezuela", "Vietnam",
+    "Yemen", "Yeni Zelanda", "Yunanistan", "Zambiya", "Zimbabve"
 ]) + ["Diğer"]
 
 temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIRIM", "FERHAT ŞEKEROĞLU"]
 
-# --- Sabitler ---
-LOGO_FILE_ID     = "1DCxtSsAeR7Zfk2IQU0UMGmD0uTdNO1B3"
-LOGO_LOCAL_NAME  = "logo1.png"
-EXCEL_FILE_ID    = "1IF6CN4oHEMk6IEE40ZGixPkfnNHLYXnQ"
-EVRAK_KLASOR_ID  = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
+# ======================
+# 3) GOOGLE SHEETS & DRIVE BAĞLANTILARI
+# ======================
+
+SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 FIYAT_TEKLIFI_ID = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
+PROFORMA_PDF_ID = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
+SIPARIS_FORMU_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
+EVRAK_KLASOR_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
 
-# --- Google Drive bağlantısı (Service Account + Streamlit secrets) ---
-@st.cache_resource
-def get_drive():
-    """
-    Streamlit Cloud'da: .streamlit/secrets.toml içinde [gcp_service_account] olmalı.
-    Lokalde: secrets yoksa otomatik LocalWebserverAuth'a düşer (tarayıcıda OAuth açar).
-    """
-    gauth = GoogleAuth()
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.file"
+]
 
+creds = service_account.Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"],
+    scopes=SCOPES
+)
+
+sheets_service = build("sheets", "v4", credentials=creds)
+sheet = sheets_service.spreadsheets()
+drive_service = build("drive", "v3", credentials=creds)
+
+def _safe_str(x):
+    # DataFrame -> Sheets güvenli string
+    if pd.isna(x):
+        return ""
+    if isinstance(x, (pd.Timestamp, datetime.datetime, datetime.date)):
+        try:
+            return pd.to_datetime(x).strftime("%Y-%m-%d")
+        except Exception:
+            return str(x)
+    return str(x)
+
+def df_to_values(df: pd.DataFrame):
+    if df is None or df.empty:
+        # Boşsa sadece başlıkları yazalım; başlık yoksa boş bir satır döndürme
+        cols = df.columns.tolist() if isinstance(df, pd.DataFrame) else []
+        return [cols] if cols else [[]]
+    clean = df.copy()
+    for c in clean.columns:
+        clean[c] = clean[c].map(_safe_str)
+    return [clean.columns.tolist()] + clean.values.tolist()
+
+def write_df(sheet_name: str, df: pd.DataFrame):
     try:
-        if "gcp_service_account" in st.secrets:
-            # Secrets içindeki JSON'u geçici dosyaya yaz
-            sa = dict(st.secrets["gcp_service_account"])
-            fd, tmp_path = tempfile.mkstemp(suffix=".json")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(sa, f)
-
-            # PyDrive2'yi service account ile yetkilendir
-            gauth.settings.update({
-                "client_config_backend": "service",
-                "service_config": {"client_json_file_path": tmp_path}
-            })
-            gauth.ServiceAuth()
-        else:
-            # Lokal geliştirme için geri dönüş (OAuth flow)
-            gauth.LocalWebserverAuth()
+        values = df_to_values(df)
+        # İlk önce temizle
+        sheet.values().clear(spreadsheetId=SHEET_ID, range=sheet_name).execute()
+        # Sonra yaz
+        sheet.values().update(
+            spreadsheetId=SHEET_ID,
+            range=sheet_name,
+            valueInputOption="RAW",
+            body={"values": values}
+        ).execute()
     except Exception as e:
-        st.error(f"Google Drive kimlik doğrulama hatası: {e}")
-        raise
+        # Konsola/loga bas; UI’da gürültü yapmamak için raise etmiyoruz
+        print(f"'{sheet_name}' yazılırken hata: {e}")
 
-    return GoogleDrive(gauth)
+def update_google_sheets():
+    write_df("Sayfa1",       df_musteri)
+    write_df("Kayıtlar",     df_kayit)
+    write_df("Teklifler",    df_teklif)
+    write_df("Proformalar",  df_proforma)
+    write_df("Evraklar",     df_evrak)
+    write_df("ETA",          df_eta)
+    write_df("FuarMusteri",  df_fuar_musteri)
 
-drive = get_drive()
+def _guess_mime_by_ext(filename: str) -> str:
+    ext = os.path.splitext(filename.lower())[1]
+    # Sık kullanılanlar
+    return {
+        ".pdf":  "application/pdf",
+        ".jpg":  "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png":  "image/png",
+        ".csv":  "text/csv",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls":  "application/vnd.ms-excel",
+        ".txt":  "text/plain",
+    }.get(ext, "application/octet-stream")
 
-# --- Logo indir (yoksa) ---
-if not os.path.exists(LOGO_LOCAL_NAME):
+def _sanitize_filename(name: str) -> str:
+    # Drive sorun çıkarmasın diye basit temizlik
+    keep = "-_.() "
+    return "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))[:180]
+
+def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
+    from googleapiclient.errors import HttpError
+    from googleapiclient.http import MediaFileUpload
+
+    filename = filename.strip()
+    folder_id = folder_id.strip()
+
+    mime = _guess_mime_by_ext(filename)  # pdf jpg vs.
+    media = MediaFileUpload(local_path, mimetype=mime, resumable=False)
+
+    meta = {"name": filename}
+    if folder_id:
+        meta["parents"] = [folder_id]
+
     try:
-        logo_file = drive.CreateFile({'id': LOGO_FILE_ID})
-        logo_file.GetContentFile(LOGO_LOCAL_NAME)
-    except Exception as e:
-        st.warning(f"Logo indirilemedi: {e}")
+        created = drive_service.files().create(
+            body=meta,
+            media_body=media,
+            fields="id",
+            supportsAllDrives=True  # <- Paylaşılan Sürücü desteği
+        ).execute()
+        fid = created["id"]
 
-# --- Üst başlık ---
-col1, col2 = st.columns([3, 7])
-with col1:
-    if os.path.exists(LOGO_LOCAL_NAME):
-        st.image(LOGO_LOCAL_NAME, width=300)
-with col2:
-    st.markdown("""
-        <style>.block-container { padding-top: 0.2rem !important; }</style>
-        <div style="display:flex; flex-direction:column; align-items:flex-start; width:100%; margin-bottom:10px;">
-            <h1 style="color: #219A41; font-weight: bold; font-size: 2.8em; letter-spacing:2px; margin:0; margin-top:-8px;">
-                ŞEKEROĞLU İHRACAT CRM
-            </h1>
-        </div>
-    """, unsafe_allow_html=True)
+        # Linki herkese açmaya çalış (başarısız olsa da sorun değil)
+        try:
+            drive_service.permissions().create(
+                fileId=fid,
+                body={"role": "reader", "type": "anyone"},
+                fields="id"
+            ).execute()
+        except Exception:
+            pass
 
-# --- Excel'i Drive'dan çek ---
-downloaded = drive.CreateFile({'id': EXCEL_FILE_ID})
-try:
-    downloaded.FetchMetadata(fetch_all=True)
-    downloaded.GetContentFile("temp.xlsx")
-except Exception as e:
-    st.error(f"CRM dosyası indirilemedi (EXCEL_FILE_ID yanlış olabilir ya da yetki yok): {e}")
+        return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
 
-# --- DataFrame’leri yükle (aynı sütun güvenliğiyle) ---
-def _read_sheet(name, cols=None):
+    except HttpError as he:
+        code = getattr(he, "status_code", None) or getattr(getattr(he, "resp", None), "status", "unknown")
+        detail = ""
+        try:
+            # he.content bytes -> str
+            detail = he.content.decode() if hasattr(he, "content") and he.content else str(he)
+        except Exception:
+            detail = str(he)
+
+        # Hızlı ipucu üretelim
+        tips = []
+        if code in (403, 404):
+            tips.append("• Klasör ID’si doğru mu ve servis hesabıyla paylaşıldı mı?")
+            tips.append("• Klasör bir Paylaşılan Sürücüdeyse supportsAllDrives=True ekli mi? (eklendi)")
+            tips.append("• SCOPES içinde 'https://www.googleapis.com/auth/drive' kullanmayı deneyin.")
+        if code == 400:
+            tips.append("• 'parents' alanındaki ID gerçekten bir klasör mü? (Dosya ID’si olmasın)")
+
+        msg = f"Drive yükleme hatası (HTTP {code}). Ayrıntı: {detail}\n" + ("\n".join(tips) if tips else "")
+        raise RuntimeError(msg) from he
+
+# ======================
+# 3b) SHEETS -> DATAFRAME YÜKLEME
+# ======================
+
+def load_sheet_as_df(sheet_name, columns):
     try:
-        df = pd.read_excel("temp.xlsx", sheet_name=name) if os.path.exists("temp.xlsx") else pd.DataFrame()
-        if cols:
-            for c in cols:
-                if c not in df.columns:
-                    df[c] = ""
+        ws = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_name).execute()
+        values = ws.get("values", [])
+        if not values:
+            return pd.DataFrame(columns=columns)
+
+        header = [h.strip() for h in values[0]]
+        data_rows = values[1:]
+
+        # Sadece ETA’da şemayı sabitle
+        if sheet_name == "ETA":
+            header = columns[:]
+
+        # Satırları başlık uzunluğuna pad/truncate et
+        H = len(header)
+        fixed_rows = []
+        for r in data_rows:
+            r = list(r)
+            if len(r) < H:
+                r = r + [""] * (H - len(r))
+            elif len(r) > H:
+                r = r[:H]
+            fixed_rows.append(r)
+
+        df = pd.DataFrame(fixed_rows, columns=header)
+
+        # Eksik olması muhtemel kolonları yine de ekle
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+
         return df
-    except Exception:
-        return pd.DataFrame({c: [] for c in (cols or [])})
-
-df_musteri = _read_sheet(0, ["Müşteri Adı","Telefon","E-posta","Adres","Ülke","Satış Temsilcisi","Kategori","Durum","Vade (Gün)","Ödeme Şekli"])
-df_kayit   = _read_sheet("Kayıtlar", ["Müşteri Adı","Tarih","Tip","Açıklama"])
-df_teklif  = _read_sheet("Teklifler", ["Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama","Durum","PDF"])
-df_proforma= _read_sheet("Proformalar", ["Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama","Durum","PDF","Sipariş Formu","Vade","Sevk Durumu"])
-df_evrak   = _read_sheet("Evraklar", ["Müşteri Adı","Fatura No","Fatura Tarihi","Vade Tarihi","Tutar",
-                                       "Commercial Invoice","Sağlık Sertifikası","Packing List","Konşimento","İhracat Beyannamesi",
-                                       "Fatura PDF","Sipariş Formu","Yük Resimleri","EK Belgeler"])
-df_eta     = _read_sheet("ETA", ["Müşteri Adı","Proforma No","ETA Tarihi","Açıklama"])
-df_fuar_musteri = _read_sheet("FuarMusteri", ["Fuar Adı","Müşteri Adı","Ülke","Telefon","E-mail","Açıklamalar","Tarih"])
-
-# --- Excel'i geri Drive’a yaz (tek fonksiyon) ---
-def update_excel():
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_musteri.to_excel(writer, sheet_name="Sayfa1", index=False)
-        df_kayit.to_excel(writer, sheet_name="Kayıtlar", index=False)
-        df_teklif.to_excel(writer, sheet_name="Teklifler", index=False)
-        df_proforma.to_excel(writer, sheet_name="Proformalar", index=False)
-        df_evrak.to_excel(writer, sheet_name="Evraklar", index=False)
-        df_eta.to_excel(writer, sheet_name="ETA", index=False)
-        df_fuar_musteri.to_excel(writer, sheet_name="FuarMusteri", index=False)
-    buffer.seek(0)
-
-    with open("temp.xlsx", "wb") as f:
-        f.write(buffer.read())
-
-    try:
-        uploaded = drive.CreateFile({'id': EXCEL_FILE_ID})
-        uploaded.SetContentFile("temp.xlsx")
-        uploaded.Upload()  # My Drive için yeterli
     except Exception as e:
-        st.error(f"CRM dosyası Drive’a yüklenemedi: {e}")
+        print(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
+        return pd.DataFrame(columns=columns)
+        
+# --- tüm sayfaları yükle ---
+df_musteri = load_sheet_as_df("Sayfa1", [
+    "Müşteri Adı","Telefon","E-posta","Adres","Ülke",
+    "Satış Temsilcisi","Kategori","Durum","Vade (Gün)","Ödeme Şekli",
+    "Para Birimi","DT Seçimi"
+])
+
+df_kayit = load_sheet_as_df("Kayıtlar", [
+    "Müşteri Adı","Tarih","Tip","Açıklama"
+])
+
+df_teklif = load_sheet_as_df("Teklifler", [
+    "Müşteri Adı","Tarih","Teklif No","Tutar",
+    "Ürün/Hizmet","Açıklama","Durum","PDF"
+])
+
+df_proforma = load_sheet_as_df("Proformalar", [
+    "Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama",
+    "Durum","PDF"," Formu","Vade (gün)","Sevk Durumu",
+    "Ülke","Satış Temsilcisi","Ödeme Şekli","Termin Tarihi",
+    "Sevk Tarihi","Ulaşma Tarihi"
+])
+
+df_evrak = load_sheet_as_df("Evraklar", [
+    "Müşteri Adı","Proforma No","Fatura No","Fatura Tarihi","Vade (gün)","Vade Tarihi","Tutar",
+    "Ülke","Satış Temsilcisi","Ödeme Şekli",
+    "Commercial Invoice","Sağlık Sertifikası","Packing List","Konşimento","İhracat Beyannamesi",
+    "Fatura PDF"," Formu","Yük Resimleri","EK Belgeler","Ödendi"
+])
+
+df_eta = load_sheet_as_df("ETA", [
+    "Müşteri Adı","Proforma No","ETA Tarihi","Açıklama"
+])
+
+df_fuar_musteri = load_sheet_as_df("FuarMusteri", [
+    "Fuar Adı","Müşteri Adı","Ülke","Telefon","E-mail","Satış Temsilcisi",
+    "Açıklamalar","Görüşme Kalitesi","Tarih"
+])
 
 
 # ========= ŞIK SIDEBAR MENÜ (RADIO + ANINDA STATE) =========
