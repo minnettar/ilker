@@ -14,6 +14,47 @@ import numpy as np
 import smtplib
 from email.message import EmailMessage
 
+# === Streamlit Ayarları ===
+st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
+
+# === Kullanıcılar ===
+USERS = {
+    "export1": "Seker12345!",
+    "admin": "Seker12345!",
+    "Boss": "Seker12345!",
+}
+
+# === Giriş Sistemi ===
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+def login_screen():
+    col1, col2 = st.columns([2, 6])
+    with col1:
+        st.image("https://www.sekeroglugroup.com/storage/settings/xdp5r6DZIFJMNGOStqwvKCiVHDhYxA84jFr61TNp.svg", width=150)
+    with col2:
+        st.title("ŞEKEROĞLU CRM - Giriş Ekranı")
+
+    username = st.text_input("Kullanıcı Adı")
+    password = st.text_input("Şifre", type="password")
+    login_btn = st.button("Giriş Yap")
+
+    if login_btn:
+        if username in USERS and password == USERS[username]:
+            st.session_state.user = username
+            st.rerun()
+        else:
+            st.error("Kullanıcı adı veya şifre hatalı.")
+
+if not st.session_state.user:
+    login_screen()
+    st.stop()
+
+# === Çıkış ===
+if st.sidebar.button("🚪 Çıkış Yap"):
+    st.session_state.user = None
+    st.rerun()
+
 # ======================
 # 2) ÜLKE ve TEMSİLCİ LİSTELERİ
 # ======================
