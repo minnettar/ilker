@@ -9,11 +9,10 @@ import streamlit as st
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
+from googleapiclient.errors import HttpError
 import numpy as np
 import smtplib
 from email.message import EmailMessage
-import json
-from googleapiclient.errors import HttpError
 
 # ======================
 # 2) ÜLKE ve TEMSİLCİ LİSTELERİ
@@ -51,28 +50,32 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 # 3) GOOGLE SHEETS & DRIVE BAĞLANTILARI
 # ======================
 
-SHEET_ID = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
+SHEET_ID         = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 FIYAT_TEKLIFI_ID = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
-PROFORMA_PDF_ID = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
+PROFORMA_PDF_ID  = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
 SIPARIS_FORMU_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
-EVRAK_KLASOR_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
+EVRAK_KLASOR_ID  = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
 
+# Drive işlemlerinde paylaşılan sürücü ve paylaşım izinleri için tam yetki:
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file"
+    "https://www.googleapis.com/auth/drive"
 ]
 
+# -> Streamlit Cloud ve lokal: st.secrets zorunlu
 creds = service_account.Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"],
-    scopes=SCOPES
+    st.secrets["gcp_service_account"], scopes=SCOPES
 )
 
 sheets_service = build("sheets", "v4", credentials=creds)
 sheet = sheets_service.spreadsheets()
 drive_service = build("drive", "v3", credentials=creds)
 
+# ======================
+# 3a) SHEETS <-> DATAFRAME YARDIMCILARI
+# ======================
+
 def _safe_str(x):
-    # DataFrame -> Sheets güvenli string
     if pd.isna(x):
         return ""
     if isinstance(x, (pd.Timestamp, datetime.datetime, datetime.date)):
@@ -84,7 +87,6 @@ def _safe_str(x):
 
 def df_to_values(df: pd.DataFrame):
     if df is None or df.empty:
-        # Boşsa sadece başlıkları yazalım; başlık yoksa boş bir satır döndürme
         cols = df.columns.tolist() if isinstance(df, pd.DataFrame) else []
         return [cols] if cols else [[]]
     clean = df.copy()
@@ -95,9 +97,7 @@ def df_to_values(df: pd.DataFrame):
 def write_df(sheet_name: str, df: pd.DataFrame):
     try:
         values = df_to_values(df)
-        # İlk önce temizle
         sheet.values().clear(spreadsheetId=SHEET_ID, range=sheet_name).execute()
-        # Sonra yaz
         sheet.values().update(
             spreadsheetId=SHEET_ID,
             range=sheet_name,
@@ -105,7 +105,6 @@ def write_df(sheet_name: str, df: pd.DataFrame):
             body={"values": values}
         ).execute()
     except Exception as e:
-        # Konsola/loga bas; UI’da gürültü yapmamak için raise etmiyoruz
         print(f"'{sheet_name}' yazılırken hata: {e}")
 
 def update_google_sheets():
@@ -117,9 +116,12 @@ def update_google_sheets():
     write_df("ETA",          df_eta)
     write_df("FuarMusteri",  df_fuar_musteri)
 
+# ======================
+# 3b) DRIVE YARDIMCILARI
+# ======================
+
 def _guess_mime_by_ext(filename: str) -> str:
     ext = os.path.splitext(filename.lower())[1]
-    # Sık kullanılanlar
     return {
         ".pdf":  "application/pdf",
         ".jpg":  "image/jpeg",
@@ -132,20 +134,15 @@ def _guess_mime_by_ext(filename: str) -> str:
     }.get(ext, "application/octet-stream")
 
 def _sanitize_filename(name: str) -> str:
-    # Drive sorun çıkarmasın diye basit temizlik
     keep = "-_.() "
-    return "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))[:180]
+    s = "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))
+    return s[:180] if s else "dosya"
 
 def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
-    from googleapiclient.errors import HttpError
-    from googleapiclient.http import MediaFileUpload
-
-    filename = filename.strip()
+    filename = _sanitize_filename(filename.strip())
     folder_id = folder_id.strip()
 
-    mime = _guess_mime_by_ext(filename)  # pdf jpg vs.
-    media = MediaFileUpload(local_path, mimetype=mime, resumable=False)
-
+    media = MediaFileUpload(local_path, mimetype=_guess_mime_by_ext(filename), resumable=False)
     meta = {"name": filename}
     if folder_id:
         meta["parents"] = [folder_id]
@@ -155,11 +152,11 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
             body=meta,
             media_body=media,
             fields="id",
-            supportsAllDrives=True  # <- Paylaşılan Sürücü desteği
+            supportsAllDrives=True
         ).execute()
         fid = created["id"]
 
-        # Linki herkese açmaya çalış (başarısız olsa da sorun değil)
+        # Linki herkese açık yapmaya çalış (başarısız olsa da kritik değil)
         try:
             drive_service.permissions().create(
                 fileId=fid,
@@ -172,28 +169,27 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
         return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
 
     except HttpError as he:
-        code = getattr(he, "status_code", None) or getattr(getattr(he, "resp", None), "status", "unknown")
+        code = getattr(getattr(he, "resp", None), "status", "unknown")
         detail = ""
         try:
-            # he.content bytes -> str
-            detail = he.content.decode() if hasattr(he, "content") and he.content else str(he)
+            detail = he.content.decode() if getattr(he, "content", None) else str(he)
         except Exception:
             detail = str(he)
 
-        # Hızlı ipucu üretelim
         tips = []
         if code in (403, 404):
-            tips.append("• Klasör ID’si doğru mu ve servis hesabıyla paylaşıldı mı?")
-            tips.append("• Klasör bir Paylaşılan Sürücüdeyse supportsAllDrives=True ekli mi? (eklendi)")
-            tips.append("• SCOPES içinde 'https://www.googleapis.com/auth/drive' kullanmayı deneyin.")
+            tips += [
+                "• Klasör ID’si doğru mu ve servis hesabıyla paylaşıldı mı?",
+                "• Klasör Paylaşılan Sürücü mü? supportsAllDrives=True zaten eklendi.",
+                "• Gerekirse SCOPES içinde full 'drive' yetkisi kullan (eklendi).",
+            ]
         if code == 400:
-            tips.append("• 'parents' alanındaki ID gerçekten bir klasör mü? (Dosya ID’si olmasın)")
+            tips += ["• 'parents' alanındaki ID kesin klasör olsun (dosya ID’si olmasın)."]
 
-        msg = f"Drive yükleme hatası (HTTP {code}). Ayrıntı: {detail}\n" + ("\n".join(tips) if tips else "")
-        raise RuntimeError(msg) from he
+        raise RuntimeError(f"Drive yükleme hatası (HTTP {code}). Ayrıntı: {detail}\n" + "\n".join(tips)) from he
 
 # ======================
-# 3b) SHEETS -> DATAFRAME YÜKLEME
+# 3c) SHEETS -> DATAFRAME YÜKLEME
 # ======================
 
 def load_sheet_as_df(sheet_name, columns):
@@ -206,11 +202,7 @@ def load_sheet_as_df(sheet_name, columns):
         header = [h.strip() for h in values[0]]
         data_rows = values[1:]
 
-        # Sadece ETA’da şemayı sabitle
-        if sheet_name == "ETA":
-            header = columns[:]
-
-        # Satırları başlık uzunluğuna pad/truncate et
+        # Satır uzunluklarını başlığa göre düzelt
         H = len(header)
         fixed_rows = []
         for r in data_rows:
@@ -223,17 +215,17 @@ def load_sheet_as_df(sheet_name, columns):
 
         df = pd.DataFrame(fixed_rows, columns=header)
 
-        # Eksik olması muhtemel kolonları yine de ekle
+        # Eksik kolonları ekle (Sheets’te yoksa)
         for col in columns:
             if col not in df.columns:
                 df[col] = ""
 
-        return df
+        return df[columns]  # kolon sırasını da sabitle
     except Exception as e:
         print(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
         return pd.DataFrame(columns=columns)
-        
-# --- tüm sayfaları yükle ---
+
+# --- Tüm sayfaları yükle (KOLON İSİMLERİ DÜZELTİLDİ) ---
 df_musteri = load_sheet_as_df("Sayfa1", [
     "Müşteri Adı","Telefon","E-posta","Adres","Ülke",
     "Satış Temsilcisi","Kategori","Durum","Vade (Gün)","Ödeme Şekli",
@@ -251,7 +243,7 @@ df_teklif = load_sheet_as_df("Teklifler", [
 
 df_proforma = load_sheet_as_df("Proformalar", [
     "Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama",
-    "Durum","PDF"," Formu","Vade (gün)","Sevk Durumu",
+    "Durum","PDF","Sipariş Formu","Vade (gün)","Sevk Durumu",
     "Ülke","Satış Temsilcisi","Ödeme Şekli","Termin Tarihi",
     "Sevk Tarihi","Ulaşma Tarihi"
 ])
@@ -260,7 +252,7 @@ df_evrak = load_sheet_as_df("Evraklar", [
     "Müşteri Adı","Proforma No","Fatura No","Fatura Tarihi","Vade (gün)","Vade Tarihi","Tutar",
     "Ülke","Satış Temsilcisi","Ödeme Şekli",
     "Commercial Invoice","Sağlık Sertifikası","Packing List","Konşimento","İhracat Beyannamesi",
-    "Fatura PDF"," Formu","Yük Resimleri","EK Belgeler","Ödendi"
+    "Fatura PDF","Sipariş Formu","Yük Resimleri","EK Belgeler","Ödendi"
 ])
 
 df_eta = load_sheet_as_df("ETA", [
