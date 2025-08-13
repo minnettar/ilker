@@ -12,3 +12,11 @@ oauth2client
 google-api-python-client
 streamlit
 pyarrow
+streamlit>=1.36
+pandas>=2.0
+pyarrow>=14
+google-api-python-client>=2.130.0
+google-auth>=2.30.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+numpy
