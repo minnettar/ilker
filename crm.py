@@ -1652,7 +1652,7 @@ elif menu == "Güncel Sipariş Durumu":
     bos_id = df_proforma["ID"].astype(str).str.strip().isin(["","nan"])
     if bos_id.any():
         df_proforma.loc[bos_id, "ID"] = [str(uuid.uuid4()) for _ in range(bos_id.sum())]
-        update_excel()
+        update_google_sheets()
 
     # ---- Filtre: Siparişe dönmüş ama sevk edilmemiş/ulaşmamış kayıtlar
     siparisler = df_proforma[
