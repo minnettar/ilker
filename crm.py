@@ -2625,7 +2625,7 @@ elif menu == "Satış Performansı":
     show_cols = [c for c in show_cols if c in df_range.columns]
     st.dataframe(df_range[show_cols].sort_values(by=date_col, ascending=False), use_container_width=True)
 
-    with st.expander("🔎 Google Sheets Bağlantı Testi", expanded=False):
+    with    st.expander("🔎 Google Sheets Bağlantı Testi", expanded=False):
     try:
         resp = sheet.values().get(spreadsheetId=SHEET_ID, range="Sayfa1!A1:Z5").execute()
         st.write("Sayfa1 ilk satırlar:", resp.get("values", []))
