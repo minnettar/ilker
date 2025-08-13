@@ -2157,51 +2157,50 @@ elif menu == "Vade Takibi":
                 update_excel()
                 st.success("Ödeme durumu güncellendi!")
                 st.rerun()
-### ===========================
-### --- ETA TAKİBİ MENÜSÜ (googleapiclient sürümü) ---
-### ===========================
+# ===========================
+# --- ETA TAKİBİ MENÜSÜ ---
+# ===========================
 elif menu == "ETA Takibi":
-    import re, tempfile, os
-    from googleapiclient.http import MediaFileUpload
+    import re, tempfile
 
-    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ETA Takibi</h2>", unsafe_allow_html=True)
+    # ---- Yedek: update_sheets() yoksa update_google_sheets() kullan ----
+    if "update_sheets" not in globals():
+        update_sheets = globals().get("update_google_sheets", lambda: None)
 
     # ---- Sabitler ----
-    ROOT_EXPORT_FOLDER_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"  # İhracat Evrakları ana klasör ID (MY DRIVE)
+    # Ana İhracat Evrak klasörü (My Drive veya Paylaşılan Sürücü olabilir)
+    ROOT_EXPORT_FOLDER_ID = globals().get("EVRAK_KLASOR_ID", "")
 
-    # ---- Güvenlik: gerekli kolonlar ----
-    for col in ["Sevk Durumu", "Proforma No", "Sevk Tarihi", "Ulaşma Tarihi"]:
+    # ---- Kolon güvenliği ----
+    for col in ["Sevk Durumu", "Proforma No", "Sevk Tarihi", "Ulaşma Tarihi", "Termin Tarihi", "Tutar", "Açıklama", "Müşteri Adı"]:
         if col not in df_proforma.columns:
             df_proforma[col] = ""
-
     for col in ["Müşteri Adı", "Proforma No", "ETA Tarihi", "Açıklama"]:
         if col not in df_eta.columns:
             df_eta[col] = ""
 
-    # ---- Yardımcılar ----
-    def safe_name(text, maxlen=120):
+    # ---- Yardımcılar: Drive isim temizliği ----
+    def safe_name(text: str, maxlen: int = 120) -> str:
         s = str(text or "").strip()
-        s = re.sub(r"\s+", " ", s)            # çoklu boşluk -> tek
-        s = s.replace(" ", "_")               # boşluk -> _
-        s = re.sub(r'[\\/*?:"<>|]+', "_", s)  # Drive yasak karakter
-        return s[:maxlen]
+        s = re.sub(r"\s+", " ", s)        # çoklu boşluk -> tek
+        s = s.replace(" ", "_")           # boşluk -> _
+        s = re.sub(r'[\\/*?:"<>|]+', "_", s)  # Drive yasak karakterleri
+        return s[:maxlen] or "dosya"
 
-    def _guess_mime(fname: str) -> str:
-        ext = os.path.splitext(fname.lower())[1]
-        return {
-            ".pdf":"application/pdf",
-            ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".png":"image/png", ".webp":"image/webp",
-        }.get(ext, "application/octet-stream")
-
-    def _find_folder_id(name: str, parent_id: str) -> str | None:
-        query = [
-            safe_name = name.replace("'", "\\'")
-            f"name = '{safe_name}'",
+    # ---- Drive: klasör bul ----
+    def _find_folder_id(name: str, parent_id: str | None) -> str | None:
+        if not name:
+            return None
+        # Tek tırnakları kaçır
+        safe = name.replace("'", r"\'")
+        parts = [
+            f"name = '{safe}'",
             "mimeType = 'application/vnd.google-apps.folder'",
             "trashed = false",
-            f"'{parent_id}' in parents" if parent_id else ""
         ]
-        q = " and ".join([p for p in query if p])
+        if parent_id:
+            parts.append(f"'{parent_id}' in parents")
+        q = " and ".join(parts)
         resp = drive_service.files().list(
             q=q,
             fields="files(id,name)",
@@ -2213,120 +2212,82 @@ elif menu == "ETA Takibi":
         files = resp.get("files", [])
         return files[0]["id"] if files else None
 
-    def _create_folder(name: str, parent_id: str) -> str:
+    # ---- Drive: klasör oluştur ya da getir ----
+    def get_or_create_folder_by_name(name: str, parent_id: str | None) -> str:
+        fid = _find_folder_id(name, parent_id)
+        if fid:
+            return fid
         meta = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
         if parent_id:
             meta["parents"] = [parent_id]
         created = drive_service.files().create(
-            body=meta, fields="id", supportsAllDrives=True
+            body=meta,
+            fields="id",
+            supportsAllDrives=True
         ).execute()
         return created["id"]
 
-    def get_or_create_folder_by_name(name: str, parent_id: str) -> str:
-        """Parent altında isme göre klasör bulur; yoksa oluşturur (Drive v3)."""
-        try:
-            fid = _find_folder_id(name, parent_id)
-            if fid:
-                return fid
-            return _create_folder(name, parent_id)
-        except Exception as e:
-            st.error(f"Klasör oluşturma/arama hatası: {e}")
-            return ""
-
+    # ---- Klasör tarihi seçim mantığı ----
     def resolve_folder_date(musteri: str, proforma_no: str) -> datetime.date:
-        # 1) Proforma Sevk Tarihi, 2) ETA Tarihi, 3) bugün
-        pr_mask = (df_proforma["Müşteri Adı"] == musteri) & (df_proforma["Proforma No"] == proforma_no)
-        sevk_ts = pd.to_datetime(df_proforma.loc[pr_mask, "Sevk Tarihi"].values[0], errors="coerce") if pr_mask.any() else pd.NaT
-        if pd.notna(sevk_ts):
-            return sevk_ts.date()
-
-        eta_mask = (df_eta["Müşteri Adı"] == musteri) & (df_eta["Proforma No"] == proforma_no)
-        eta_ts = pd.to_datetime(df_eta.loc[eta_mask, "ETA Tarihi"].values[0], errors="coerce") if eta_mask.any() else pd.NaT
-        if pd.notna(eta_ts):
-            return eta_ts.date()
-
+        # 1) Sevk Tarihi
+        pm = (df_proforma["Müşteri Adı"] == musteri) & (df_proforma["Proforma No"] == proforma_no)
+        if pm.any():
+            sevk_ts = pd.to_datetime(df_proforma.loc[pm, "Sevk Tarihi"].values[0], errors="coerce")
+            if pd.notna(sevk_ts):
+                try:
+                    return sevk_ts.date()
+                except Exception:
+                    pass
+        # 2) ETA Tarihi
+        em = (df_eta["Müşteri Adı"] == musteri) & (df_eta["Proforma No"] == proforma_no)
+        if em.any():
+            eta_ts = pd.to_datetime(df_eta.loc[em, "ETA Tarihi"].values[0], errors="coerce")
+            if pd.notna(eta_ts):
+                try:
+                    return eta_ts.date()
+                except Exception:
+                    pass
+        # 3) Bugün
         return datetime.date.today()
 
+    # ---- Müşteri + Tarih bazlı Yükleme Resimleri klasörü ----
     def get_loading_photos_folder(musteri_adi: str, tarih: datetime.date) -> str:
         if not ROOT_EXPORT_FOLDER_ID:
             return ""
-        folder_name = f"{safe_name(musteri_adi)}_{tarih.strftime('%Y-%m-%d')}"
-        parent = get_or_create_folder_by_name(folder_name, ROOT_EXPORT_FOLDER_ID)
-        if not parent:
-            return ""
-        yukleme = get_or_create_folder_by_name("Yükleme Resimleri", parent)
-        return yukleme
+        musteri_tarih = f"{safe_name(musteri_adi)}_{tarih.strftime('%Y-%m-%d')}"
+        parent = get_or_create_folder_by_name(musteri_tarih, ROOT_EXPORT_FOLDER_ID)
+        return get_or_create_folder_by_name("Yükleme Resimleri", parent)
 
-    def list_files(folder_id: str):
-        """Klasördeki dosyaları (ilk 100) döndürür."""
-        try:
-            resp = drive_service.files().list(
-                q=f"'{folder_id}' in parents and trashed = false",
-                fields="files(id,name,mimeType,size)",
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True,
-                corpora="allDrives",
-                pageSize=100,
-            ).execute()
-            return resp.get("files", [])
-        except Exception as e:
-            st.warning(f"Dosyalar listelenemedi: {e}")
-            return []
-
-    def upload_to_folder(folder_id: str, up_file) -> str | None:
-        """Streamlit file_uploader dosyasını Drive’a yükler, link döndürür."""
-        suffix = os.path.splitext(up_file.name)[1].lower()
-        safe_base = safe_name(os.path.splitext(up_file.name)[0])
-        fname = f"{safe_base}{suffix}"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fp:
-            fp.write(up_file.read())
-            tmp_path = fp.name
-        try:
-            media = MediaFileUpload(tmp_path, mimetype=_guess_mime(fname), resumable=False)
-            meta = {"name": fname, "parents": [folder_id]}
-            created = drive_service.files().create(
-                body=meta, media_body=media, fields="id", supportsAllDrives=True
-            ).execute()
-            fid = created["id"]
-            # opsiyonel: herkese görüntüleme izni
-            try:
-                drive_service.permissions().create(
-                    fileId=fid, body={"role": "reader", "type": "anyone"}, fields="id"
-                ).execute()
-            except Exception:
-                pass
-            return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
-        finally:
-            try: os.remove(tmp_path)
-            except: pass
+    # UI Başlık
+    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ETA Takibi</h2>", unsafe_allow_html=True)
 
     # ==== SEVKEDİLENLER (Yolda) ====
     sevkedilenler = df_proforma[df_proforma["Sevk Durumu"] == "Sevkedildi"].copy()
     if sevkedilenler.empty:
         st.info("Sevkedilmiş sipariş bulunmuyor.")
     else:
+        # Seçim
         secenekler = sevkedilenler[["Müşteri Adı", "Proforma No"]].drop_duplicates()
-        secenekler["sec_text"] = secenekler["Müşteri Adı"] + " - " + secenekler["Proforma No"]
+        secenekler["sec_text"] = secenekler["Müşteri Adı"].astype(str) + " - " + secenekler["Proforma No"].astype(str)
         selected = st.selectbox("Sevkedilen Sipariş Seç", secenekler["sec_text"])
-        selected_row = secenekler[secenekler["sec_text"] == selected].iloc[0]
-        sec_musteri = selected_row["Müşteri Adı"]
-        sec_proforma = selected_row["Proforma No"]
+        sel_row = secenekler[secenekler["sec_text"] == selected].iloc[0]
+        sec_musteri = str(sel_row["Müşteri Adı"])
+        sec_proforma = str(sel_row["Proforma No"])
 
-        # Klasör tarihi (Sevk/ETA/bugün) + Müşteri adı
+        # Klasör tarihi (Sevk/ETA/bugün)
         klasor_tarih = resolve_folder_date(sec_musteri, sec_proforma)
 
         # ========== YÜKLEME FOTOĞRAFLARI ==========
-        st.markdown("#### 🖼️ Yükleme Fotoğrafları (Müşteri + Tarih bazlı)")
+        st.markdown("#### 🖼️ Yükleme Fotoğrafları (Müşteri + Tarih)")
 
         hedef_klasor = get_loading_photos_folder(sec_musteri, klasor_tarih)
         if not hedef_klasor:
-            st.error("Klasör hiyerarşisi oluşturulamadı.")
+            st.error("Klasör hiyerarşisi oluşturulamadı. Lütfen ROOT_EXPORT_FOLDER_ID (EVRAK_KLASOR_ID) kontrol edin.")
         else:
-            # 1) Klasörü yeni sekmede aç
-            drive_link = f"https://drive.google.com/drive/folders/{hedef_klasor}?usp=sharing"
-            st.markdown(f"[🔗 Klasörü yeni sekmede aç]({drive_link})")
+            # Aç butonu
+            st.markdown(f"[🔗 Klasörü yeni sekmede aç](https://drive.google.com/drive/folders/{hedef_klasor}?usp=sharing)")
 
-            # 2) Panel içinde gömülü görüntüleme
+            # Panel içinde embed
             with st.expander(f"📂 Panelde klasörü görüntüle – {sec_musteri} / {klasor_tarih.strftime('%Y-%m-%d')}"):
                 embed = f"https://drive.google.com/embeddedfolderview?id={hedef_klasor}#grid"
                 st.markdown(
@@ -2335,118 +2296,153 @@ elif menu == "ETA Takibi":
                     unsafe_allow_html=True
                 )
 
-            # 3) Mevcut dosyaları say ve özetle
-            mevcut_dosyalar = list_files(hedef_klasor)
+            # Mevcut dosyaları say
+            try:
+                resp = drive_service.files().list(
+                    q=f"'{hedef_klasor}' in parents and trashed = false",
+                    fields="files(id,name)",
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                    corpora="allDrives",
+                    pageSize=200,
+                ).execute()
+                mevcut_dosyalar = resp.get("files", [])
+            except Exception as e:
+                mevcut_dosyalar = []
+                st.warning(f"Dosyalar listelenemedi: {e}")
+
             if mevcut_dosyalar:
                 st.caption(f"Bu klasörde {len(mevcut_dosyalar)} dosya var.")
-                isimler = [f"- {f['name']}" for f in mevcut_dosyalar[:10]]
-                if isimler: st.write("\n".join(isimler))
-                if len(mevcut_dosyalar) > 10: st.write("…")
+                preview = "\n".join(f"- {f['name']}" for f in mevcut_dosyalar[:10])
+                if preview:
+                    st.write(preview)
+                if len(mevcut_dosyalar) > 10:
+                    st.write("…")
 
-            # 4) Dosya Ekle – duplike önleme
-            with st.expander("➕ Dosya Ekle (opsiyonel, duplike önleme)"):
+            # Dosya ekle (duplike isim engelle)
+            with st.expander("➕ Dosya Ekle (duplike isimleri atlar)"):
                 files = st.file_uploader(
                     "Yüklenecek dosyaları seçin",
-                    type=["pdf","jpg","jpeg","png","webp"],
+                    type=["pdf", "jpg", "jpeg", "png", "webp"],
                     accept_multiple_files=True,
-                    key=f"yuk_resimleri_dedupe_{sec_musteri}_{klasor_tarih}"
+                    key=f"yuk_resimleri_{sec_musteri}_{klasor_tarih}"
                 )
                 if files:
-                    var_isimler = {f["name"] for f in mevcut_dosyalar}
-                    yuklenen, atlanan = 0, 0
+                    var_olan_isimler = {f["name"] for f in mevcut_dosyalar}
+                    yuklenen_say = 0
+                    atlanan_duplike = 0
+
                     for up in files:
-                        base = safe_name(os.path.splitext(up.name)[0])
-                        ext  = os.path.splitext(up.name)[1].lower()
-                        fname = f"{base}{ext}"
-                        if fname in var_isimler:
-                            atlanan += 1
+                        suffix = os.path.splitext(up.name)[1].lower() or ""
+                        base = os.path.splitext(up.name)[0]
+                        fname = safe_name(base) + suffix
+                        if fname in var_olan_isimler:
+                            atlanan_duplike += 1
                             continue
-                        link = upload_to_folder(hedef_klasor, up)
-                        if link:
-                            yuklenen += 1
-                            var_isimler.add(fname)
-                    if yuklenen:
-                        update_google_sheets()
-                        st.success(f"{yuklenen} yeni dosya yüklendi.")
-                        if atlanan:
-                            st.info(f"{atlanan} dosya aynı isimle bulunduğu için atlandı.")
-                        st.rerun()
-                    else:
-                        if atlanan:
-                            st.warning("Tüm dosyalar klasörde zaten mevcut (isimler aynı).")
+
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fp:
+                            fp.write(up.read())
+                            tmp_path = fp.name
+
+                        media = MediaFileUpload(tmp_path, resumable=False)
+                        meta = {"name": fname, "parents": [hedef_klasor]}
+                        try:
+                            drive_service.files().create(
+                                body=meta, media_body=media, fields="id",
+                                supportsAllDrives=True
+                            ).execute()
+                            yuklenen_say += 1
+                            var_olan_isimler.add(fname)
+                        except Exception as e:
+                            st.error(f"{up.name} yüklenemedi: {e}")
+                        finally:
+                            try: os.remove(tmp_path)
+                            except: pass
+
+                    if yuklenen_say:
+                        st.success(f"{yuklenen_say} yeni dosya yüklendi.")
+                        if atlanan_duplike:
+                            st.info(f"{atlanan_duplike} dosya aynı isimle bulunduğu için atlandı.")
+                    elif atlanan_duplike and not yuklenen_say:
+                        st.warning("Tüm dosyalar klasörde zaten mevcut (isimler aynı).")
 
         st.markdown("---")
 
         # ========== ETA Düzenleme ==========
-        filtre = (df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma)
-        mevcut_eta = df_eta.loc[filtre, "ETA Tarihi"].values[0] if filtre.any() else ""
-        mevcut_aciklama = df_eta.loc[filtre, "Açıklama"].values[0] if filtre.any() else ""
+        # Önceden ETA girilmiş mi?
+        flt = (df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma)
+        mevcut_eta = df_eta.loc[flt, "ETA Tarihi"].values[0] if flt.any() else ""
+        mevcut_aciklama = df_eta.loc[flt, "Açıklama"].values[0] if flt.any() else ""
 
         with st.form("edit_eta"):
             try:
-                varsayilan_eta = pd.to_datetime(mevcut_eta).date() if mevcut_eta and pd.notnull(mevcut_eta) and str(mevcut_eta) != "NaT" else datetime.date.today()
+                varsayilan_eta = pd.to_datetime(mevcut_eta).date() if mevcut_eta and pd.notna(mevcut_eta) else datetime.date.today()
             except Exception:
                 varsayilan_eta = datetime.date.today()
             eta_tarih = st.date_input("ETA Tarihi", value=varsayilan_eta)
-            aciklama = st.text_area("Açıklama", value=mevcut_aciklama)
-            guncelle = st.form_submit_button("ETA'yı Kaydet/Güncelle")
-            ulasti   = st.form_submit_button("Ulaştı")
-            geri_al  = st.form_submit_button("Sevki Geri Al")
+            aciklama = st.text_area("Açıklama", value=str(mevcut_aciklama or ""))
+            col_a, col_b, col_c = st.columns(3)
+            guncelle = col_a.form_submit_button("ETA'yı Kaydet/Güncelle")
+            ulasti   = col_b.form_submit_button("Ulaştı")
+            geri_al  = col_c.form_submit_button("Sevki Geri Al")
 
-            if guncelle:
-                if filtre.any():
-                    df_eta.loc[filtre, "ETA Tarihi"] = eta_tarih
-                    df_eta.loc[filtre, "Açıklama"] = aciklama
-                else:
-                    new_row = {"Müşteri Adı": sec_musteri, "Proforma No": sec_proforma,
-                               "ETA Tarihi": eta_tarih, "Açıklama": aciklama}
-                    df_eta = pd.concat([df_eta, pd.DataFrame([new_row])], ignore_index=True)
-                update_google_sheets()
-                st.success("ETA kaydedildi/güncellendi!")
-                st.rerun()
+        if guncelle:
+            if flt.any():
+                df_eta.loc[flt, "ETA Tarihi"] = eta_tarih
+                df_eta.loc[flt, "Açıklama"] = aciklama
+            else:
+                df_eta = pd.concat([df_eta, pd.DataFrame([{
+                    "Müşteri Adı": sec_musteri,
+                    "Proforma No": sec_proforma,
+                    "ETA Tarihi": eta_tarih,
+                    "Açıklama": aciklama
+                }])], ignore_index=True)
+            update_sheets()
+            st.success("ETA kaydedildi/güncellendi!")
+            st.rerun()
 
-            if ulasti:
-                df_eta = df_eta[~((df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma))]
-                idx = df_proforma[(df_proforma["Müşteri Adı"] == sec_musteri) & (df_proforma["Proforma No"] == sec_proforma)].index
-                if len(idx) > 0:
-                    df_proforma.at[idx[0], "Sevk Durumu"] = "Ulaşıldı"
-                    df_proforma.at[idx[0], "Ulaşma Tarihi"] = datetime.date.today()
-                update_google_sheets()
-                st.success("Sipariş 'Ulaşıldı' olarak işaretlendi ve ETA takibinden çıkarıldı!")
-                st.rerun()
+        if ulasti:
+            # Ulaşıldı: ETA'dan çıkar, proforma'da Sevk Durumu=Ulaşıldı + Ulaşma Tarihi=today
+            df_eta = df_eta[~flt].reset_index(drop=True)
+            pidx = df_proforma[(df_proforma["Müşteri Adı"] == sec_musteri) &
+                               (df_proforma["Proforma No"] == sec_proforma)].index
+            if len(pidx) > 0:
+                df_proforma.at[pidx[0], "Sevk Durumu"] = "Ulaşıldı"
+                df_proforma.at[pidx[0], "Ulaşma Tarihi"] = datetime.date.today()
+            update_sheets()
+            st.success("Sipariş 'Ulaşıldı' olarak işaretlendi ve ETA takibinden çıkarıldı!")
+            st.rerun()
 
-            if geri_al:
-                df_eta = df_eta[~((df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma))]
-                idx = df_proforma[(df_proforma["Müşteri Adı"] == sec_musteri) & (df_proforma["Proforma No"] == sec_proforma)].index
-                if len(idx) > 0:
-                    df_proforma.at[idx[0], "Sevk Durumu"] = ""
-                update_google_sheets()
-                st.success("Sevkiyat geri alındı! Sipariş tekrar Güncel Sipariş Durumu'na gönderildi.")
-                st.rerun()
+        if geri_al:
+            # Siparişi geri al: ETA'dan çıkar, proforma'da sevk durumunu boş yap
+            df_eta = df_eta[~flt].reset_index(drop=True)
+            pidx = df_proforma[(df_proforma["Müşteri Adı"] == sec_musteri) &
+                               (df_proforma["Proforma No"] == sec_proforma)].index
+            if len(pidx) > 0:
+                df_proforma.at[pidx[0], "Sevk Durumu"] = ""
+            update_sheets()
+            st.success("Sevkiyat geri alındı! Sipariş tekrar Güncel Sipariş Durumu'na döndü.")
+            st.rerun()
 
     # ==== ETA TAKİP LİSTESİ ====
     st.markdown("#### ETA Takip Listesi")
-    for col in ["Proforma No", "ETA Tarihi"]:
-        if col not in df_eta.columns:
-            df_eta[col] = ""
     if not df_eta.empty:
-        df_eta["ETA Tarihi"] = pd.to_datetime(df_eta["ETA Tarihi"], errors="coerce")
+        df_eta_disp = df_eta.copy()
+        df_eta_disp["ETA Tarihi"] = pd.to_datetime(df_eta_disp["ETA Tarihi"], errors="coerce")
         today = pd.to_datetime(datetime.date.today())
-        df_eta["Kalan Gün"] = (df_eta["ETA Tarihi"] - today).dt.days
-        tablo = df_eta[["Müşteri Adı", "Proforma No", "ETA Tarihi", "Kalan Gün", "Açıklama"]].copy()
+        df_eta_disp["Kalan Gün"] = (df_eta_disp["ETA Tarihi"] - today).dt.days
+        tablo = df_eta_disp[["Müşteri Adı", "Proforma No", "ETA Tarihi", "Kalan Gün", "Açıklama"]].copy()
         tablo = tablo.sort_values(["ETA Tarihi", "Müşteri Adı", "Proforma No"], ascending=[True, True, True])
         st.dataframe(tablo, use_container_width=True)
 
+        # Silme
         st.markdown("##### ETA Kaydı Sil")
-        silinecekler = df_eta.index.tolist()
-        sil_sec = st.selectbox(
-            "Silinecek Kaydı Seçin",
-            options=silinecekler,
-            format_func=lambda i: f"{df_eta.at[i, 'Müşteri Adı']} - {df_eta.at[i, 'Proforma No']}"
-        )
+        sil_ops = df_eta.index.tolist()
+        sil_sec = st.selectbox("Silinecek Kaydı Seçin", options=sil_ops,
+                               format_func=lambda i: f"{df_eta.at[i, 'Müşteri Adı']} - {df_eta.at[i, 'Proforma No']}")
         if st.button("KAYDI SİL"):
             df_eta = df_eta.drop(sil_sec).reset_index(drop=True)
-            update_google_sheets()
+            update_sheets()
             st.success("Seçilen ETA kaydı silindi!")
             st.rerun()
     else:
@@ -2455,26 +2451,26 @@ elif menu == "ETA Takibi":
     # ==== ULAŞANLAR (TESLİM EDİLENLER) ====
     ulasanlar = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"].copy()
     if not ulasanlar.empty:
-        ulasanlar["sec_text"] = ulasanlar["Müşteri Adı"] + " - " + ulasanlar["Proforma No"]
+        ulasanlar["sec_text"] = ulasanlar["Müşteri Adı"].astype(str) + " - " + ulasanlar["Proforma No"].astype(str)
         st.markdown("#### Teslim Edilen Siparişlerde İşlemler")
         selected_ulasan = st.selectbox("Sipariş Seçiniz", ulasanlar["sec_text"])
         row = ulasanlar[ulasanlar["sec_text"] == selected_ulasan].iloc[0]
 
         # Ulaşma tarihi düzenleme
         try:
-            current_ulasma = pd.to_datetime(row.get("Ulaşma Tarihi", None)).date()
-            if pd.isnull(current_ulasma) or str(current_ulasma) == "NaT":
+            current_ulasma = pd.to_datetime(row.get("Ulaşma Tarihi", None), errors="coerce").date()
+            if pd.isnull(current_ulasma):
                 current_ulasma = datetime.date.today()
         except Exception:
             current_ulasma = datetime.date.today()
 
         new_ulasma_tarih = st.date_input("Ulaşma Tarihi", value=current_ulasma, key="ulasan_guncelle")
         if st.button("Ulaşma Tarihini Kaydet"):
-            idx = df_proforma[(df_proforma["Müşteri Adı"] == row["Müşteri Adı"]) &
-                              (df_proforma["Proforma No"] == row["Proforma No"])].index
-            if len(idx) > 0:
-                df_proforma.at[idx[0], "Ulaşma Tarihi"] = new_ulasma_tarih
-                update_google_sheets()
+            pidx = df_proforma[(df_proforma["Müşteri Adı"] == row["Müşteri Adı"]) &
+                               (df_proforma["Proforma No"] == row["Proforma No"])].index
+            if len(pidx) > 0:
+                df_proforma.at[pidx[0], "Ulaşma Tarihi"] = new_ulasma_tarih
+                update_sheets()
                 st.success("Ulaşma Tarihi güncellendi!")
                 st.rerun()
 
@@ -2487,42 +2483,46 @@ elif menu == "ETA Takibi":
             onay = st.form_submit_button("Yola Geri Al")
 
         if onay:
-            musteri = row["Müşteri Adı"]; pno = row["Proforma No"]
+            musteri = str(row["Müşteri Adı"])
+            pno = str(row["Proforma No"])
 
-            idx = df_proforma[(df_proforma["Müşteri Adı"] == musteri) & (df_proforma["Proforma No"] == pno)].index
-            if len(idx) > 0:
-                df_proforma.at[idx[0], "Sevk Durumu"] = "Sevkedildi"
-                df_proforma.at[idx[0], "Ulaşma Tarihi"] = ""
+            # Proforma statüsü
+            pidx = df_proforma[(df_proforma["Müşteri Adı"] == musteri) & (df_proforma["Proforma No"] == pno)].index
+            if len(pidx) > 0:
+                df_proforma.at[pidx[0], "Sevk Durumu"] = "Sevkedildi"
+                df_proforma.at[pidx[0], "Ulaşma Tarihi"] = ""
 
-            filtre_eta = (df_eta["Müşteri Adı"] == musteri) & (df_eta["Proforma No"] == pno)
+            # ETA ekle/güncelle
+            flt_eta = (df_eta["Müşteri Adı"] == musteri) & (df_eta["Proforma No"] == pno)
             eta_deger = pd.to_datetime(yeni_eta) if yeni_eta else ""
-            if filtre_eta.any():
-                if yeni_eta: df_eta.loc[filtre_eta, "ETA Tarihi"] = eta_deger
-                if aciklama_geri: df_eta.loc[filtre_eta, "Açıklama"] = aciklama_geri
+            if flt_eta.any():
+                if yeni_eta:
+                    df_eta.loc[flt_eta, "ETA Tarihi"] = eta_deger
+                if aciklama_geri:
+                    df_eta.loc[flt_eta, "Açıklama"] = aciklama_geri
             else:
-                df_eta = pd.concat([df_eta, pd.DataFrame([{
-                    "Müşteri Adı": musteri, "Proforma No": pno,
-                    "ETA Tarihi": eta_deger if yeni_eta else "", "Açıklama": aciklama_geri
-                }])], ignore_index=True)
+                yeni_satir = {
+                    "Müşteri Adı": musteri,
+                    "Proforma No": pno,
+                    "ETA Tarihi": eta_deger if yeni_eta else "",
+                    "Açıklama": aciklama_geri,
+                }
+                df_eta = pd.concat([df_eta, pd.DataFrame([yeni_satir])], ignore_index=True)
 
-            update_google_sheets()
+            update_sheets()
             st.success("Sipariş, Ulaşanlar'dan geri alındı ve ETA listesine taşındı (Sevkedildi).")
             st.rerun()
 
+        # Ulaşanlar Tablosu
         st.markdown("#### Ulaşan (Teslim Edilmiş) Siparişler")
-        # tarih kolonlarını düzgün göster
-        if "Sevk Tarihi" in ulasanlar.columns: ulasanlar["Sevk Tarihi"] = pd.to_datetime(ulasanlar["Sevk Tarihi"], errors="coerce")
-        else: ulasanlar["Sevk Tarihi"] = pd.NaT
-        if "Termin Tarihi" in ulasanlar.columns: ulasanlar["Termin Tarihi"] = pd.to_datetime(ulasanlar["Termin Tarihi"], errors="coerce")
-        else: ulasanlar["Termin Tarihi"] = pd.NaT
-        ulasanlar["Ulaşma Tarihi"] = pd.to_datetime(ulasanlar["Ulaşma Tarihi"], errors="coerce")
-
+        for dtcol in ["Sevk Tarihi", "Termin Tarihi", "Ulaşma Tarihi"]:
+            ulasanlar[dtcol] = pd.to_datetime(ulasanlar[dtcol], errors="coerce")
         ulasanlar["Gün Farkı"] = (ulasanlar["Ulaşma Tarihi"] - ulasanlar["Termin Tarihi"]).dt.days
-        ulasanlar["Sevk Tarihi"]   = ulasanlar["Sevk Tarihi"].dt.strftime("%d/%m/%Y")
+        ulasanlar["Sevk Tarihi"] = ulasanlar["Sevk Tarihi"].dt.strftime("%d/%m/%Y")
         ulasanlar["Termin Tarihi"] = ulasanlar["Termin Tarihi"].dt.strftime("%d/%m/%Y")
         ulasanlar["Ulaşma Tarihi"] = ulasanlar["Ulaşma Tarihi"].dt.strftime("%d/%m/%Y")
 
-        tablo = ulasanlar[["Müşteri Adı","Proforma No","Termin Tarihi","Sevk Tarihi","Ulaşma Tarihi","Gün Farkı","Tutar","Açıklama"]]
+        tablo = ulasanlar[["Müşteri Adı", "Proforma No", "Termin Tarihi", "Sevk Tarihi", "Ulaşma Tarihi", "Gün Farkı", "Tutar", "Açıklama"]]
         st.dataframe(tablo, use_container_width=True)
     else:
         st.info("Henüz ulaşan sipariş yok.")
