@@ -2195,7 +2195,8 @@ elif menu == "ETA Takibi":
 
     def _find_folder_id(name: str, parent_id: str) -> str | None:
         query = [
-            f"name = '{name.replace(\"'\", \"\\'\")}'",
+            safe_name = name.replace("'", "\\'")
+            f"name = '{safe_name}'",
             "mimeType = 'application/vnd.google-apps.folder'",
             "trashed = false",
             f"'{parent_id}' in parents" if parent_id else ""
