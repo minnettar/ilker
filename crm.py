@@ -113,7 +113,7 @@ sheet = sheets_service.spreadsheets()
 drive_service = build("drive", "v3", credentials=creds)
 
 # ======================
-# 3a) SHEETS <-> DATAFRAME YARDIMCILARI
+# SHEETS <-> DATAFRAME YAZMA: GÜVENLİ SÜRÜM
 # ======================
 
 def _safe_str(x):
@@ -127,40 +127,66 @@ def _safe_str(x):
     return str(x)
 
 def df_to_values(df: pd.DataFrame):
-    if df is None or df.empty:
-        cols = df.columns.tolist() if isinstance(df, pd.DataFrame) else []
+    """DataFrame'i Sheets'e uygun 2D listeye çevirir."""
+    if not isinstance(df, pd.DataFrame):
+        return [[]]
+    if df.empty:
+        # Başlıklar varsa onları döndür, yoksa tek boş satır
+        cols = df.columns.tolist()
         return [cols] if cols else [[]]
     clean = df.copy()
     for c in clean.columns:
         clean[c] = clean[c].map(_safe_str)
     return [clean.columns.tolist()] + clean.values.tolist()
 
-def write_df(sheet_name: str, df: pd.DataFrame):
+def write_df(sheet_name: str, df: pd.DataFrame, *, allow_clear_on_empty: bool = False):
+    """
+    Sheets sayfasını güvenli biçimde günceller.
+    - df boşsa (len==0) ve allow_clear_on_empty=False ise sayfaya DOKUNMAZ (clear etmez).
+    - df boşsa ama sayfayı bilerek sıfırlamak istiyorsan allow_clear_on_empty=True kullan.
+    """
     try:
+        if not isinstance(df, pd.DataFrame):
+            print(f"[write_df] {sheet_name}: df tipi DataFrame değil, atlandı.")
+            return
+
+        if df.empty and not allow_clear_on_empty:
+            print(f"[write_df] {sheet_name}: DF boş. Sayfa korunuyor (clear yapılmadı).")
+            return
+
         values = df_to_values(df)
+
+        # Önce temizle (yalnızca gerçekten yazacağız/sıfırlayacağız)
         sheet.values().clear(spreadsheetId=SHEET_ID, range=sheet_name).execute()
+
+        # Sonra yaz
         sheet.values().update(
             spreadsheetId=SHEET_ID,
             range=sheet_name,
             valueInputOption="RAW",
             body={"values": values}
         ).execute()
+
+        print(f"[write_df] {sheet_name}: {len(df)} satır yazıldı (allow_clear_on_empty={allow_clear_on_empty}).")
+
     except Exception as e:
-        print(f"'{sheet_name}' yazılırken hata: {e}")
+        print(f"[write_df] '{sheet_name}' yazılırken hata: {e}")
 
 def update_google_sheets():
-    write_df("Sayfa1",       df_musteri)
-    write_df("Kayıtlar",     df_kayit)
-    write_df("Teklifler",    df_teklif)
-    write_df("Proformalar",  df_proforma)
-    write_df("Evraklar",     df_evrak)
-    write_df("ETA",          df_eta)
-    write_df("FuarMusteri",  df_fuar_musteri)
-    
-# --- Eski çağrılar için uyumluluk köprüsü ---
-def update_excel():
-    """Eski kodda kalan update_excel() çağrılarını Sheets'e yönlendirir."""
-    update_google_sheets()
+    """
+    Tüm sayfaları tek noktadan güvenli şekilde günceller.
+    Her DF boşsa sayfayı dokunmadan bırakır.
+    """
+    write_df("Sayfa1",      df_musteri)
+    write_df("Kayıtlar",    df_kayit)
+    write_df("Teklifler",   df_teklif)
+    write_df("Proformalar", df_proforma)
+    write_df("Evraklar",    df_evrak)
+    write_df("ETA",         df_eta)
+    write_df("FuarMusteri", df_fuar_musteri)
+
+# --- İSTEĞE BAĞLI: bir sayfayı bilinçli sıfırlamak istersen örnek kullanım ---
+# write_df("Proformalar", pd.DataFrame(columns=df_proforma.columns), allow_clear_on_empty=True)
     
 # ======================
 # 3b) DRIVE YARDIMCILARI
