@@ -2077,8 +2077,6 @@ elif menu == "Fatura & İhracat Evrakları":
         update_sheets()
         st.success(f"Evrak {islem}!")
         st.rerun()
-
-
 ### ===========================
 ### --- VADE TAKİBİ MENÜSÜ ---
 ### ===========================
@@ -2086,31 +2084,77 @@ elif menu == "Vade Takibi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Vade Takibi</h2>", unsafe_allow_html=True)
 
     # Gerekli kolonlar yoksa ekle
-    for c in ["Müşteri Adı","Fatura No","Vade Tarihi","Tutar_num","Ülke","Satış Temsilcisi","Ödeme Şekli","Ödendi"]:
+    for c in ["Müşteri Adı","Fatura No","Vade Tarihi","Tutar","Ülke","Satış Temsilcisi","Ödeme Şekli","Ödendi"]:
         if c not in df_evrak.columns:
             df_evrak[c] = "" if c != "Ödendi" else False
 
-    # Sadece vadesi olan kayıtlar
+    # --- Tutarı sayıya çevir (USD/EUR/TL vs. temizler) ---
+    def smart_to_num(x):
+        if pd.isna(x): return 0.0
+        s = str(x).strip()
+        for sym in ["USD","$","€","EUR","₺","TL","tl","Tl"]:
+            s = s.replace(sym, "")
+        s = s.replace("\u00A0","").replace(" ","")
+        try:
+            return float(s)  # US format
+        except Exception:
+            pass
+        if "," in s:
+            try:
+                return float(s.replace(".","").replace(",", "."))  # EU format
+            except Exception:
+                pass
+        return 0.0
+
+    # --- Ödendi'yi güvenli bool'a çevir ---
+    TRUE_SET  = {"true","1","evet","yes","y","paid","ödendi","ödenmiş"}
+    FALSE_SET = {"false","0","hayir","hayır","no","n","unpaid","ödenmedi","beklemede",""}
+
+    def to_bool(x):
+        if isinstance(x, bool):
+            return x
+        if pd.isna(x):  # boşsa ödenmemiş kabul
+            return False
+        s = str(x).strip().lower()
+        if s in TRUE_SET:  return True
+        if s in FALSE_SET: return False
+        # 0/1 gibi sayısal metinler
+        try:
+            return float(s) != 0.0
+        except Exception:
+            return False
+
+    # --- Çalışma kopyası ---
     vade_df = df_evrak.copy()
+
+    # Tutar_num üret
+    vade_df["Tutar_num"] = vade_df["Tutar"].apply(smart_to_num).fillna(0.0)
+
+    # Vade Tarihi tarih tipine
     vade_df["Vade Tarihi"] = pd.to_datetime(vade_df["Vade Tarihi"], errors="coerce")
+
+    # Sadece vadesi olanlar
     vade_df = vade_df[vade_df["Vade Tarihi"].notna()]
 
     if vade_df.empty:
         st.info("Vade tarihi girilmiş kayıt bulunmuyor.")
     else:
+        # Ödendi_bool üret
+        vade_df["Ödendi_bool"] = vade_df["Ödendi"].apply(to_bool)
+
         today = pd.Timestamp.today().normalize()
         vade_df["Kalan Gün"] = (vade_df["Vade Tarihi"] - today).dt.days
 
         # Ödenmemişler üzerinden özet kutucukları
-        acik = vade_df[~vade_df["Ödendi"]].copy()
+        acik = vade_df[~vade_df["Ödendi_bool"]].copy()
         vadesi_gelmemis = acik[acik["Kalan Gün"] > 0]
-        bugun = acik[acik["Kalan Gün"] == 0]
-        gecikmis = acik[acik["Kalan Gün"] < 0]
+        bugun            = acik[acik["Kalan Gün"] == 0]
+        gecikmis         = acik[acik["Kalan Gün"] < 0]
 
         c1, c2, c3 = st.columns(3)
         c1.metric("📅 Vadesi Gelmemiş", f"{float(vadesi_gelmemis['Tutar_num'].sum()):,.2f} USD", f"{len(vadesi_gelmemis)} Fatura")
-        c2.metric("⚠️ Bugün Vadesi",   f"{float(bugun['Tutar_num'].sum()):,.2f} USD", f"{len(bugun)} Fatura")
-        c3.metric("⛔ Gecikmiş",        f"{float(gecikmis['Tutar_num'].sum()):,.2f} USD", f"{len(gecikmis)} Fatura")
+        c2.metric("⚠️ Bugün Vadesi",   f"{float(bugun['Tutar_num'].sum()):,.2f} USD",           f"{len(bugun)} Fatura")
+        c3.metric("⛔ Gecikmiş",        f"{float(gecikmis['Tutar_num'].sum()):,.2f} USD",        f"{len(gecikmis)} Fatura")
 
         st.markdown("---")
 
@@ -2126,37 +2170,43 @@ elif menu == "Vade Takibi":
         if tem_f:
             view = view[view["Satış Temsilcisi"].isin(tem_f)]
         if durum_f == "Ödenmemiş (varsayılan)":
-            view = view[~view["Ödendi"]]
+            view = view[~view["Ödendi_bool"]]
         elif durum_f == "Sadece Ödenmiş":
-            view = view[view["Ödendi"]]
+            view = view[view["Ödendi_bool"]]
 
-        # Görüntü tablosu (görsel kopya)
+        # Görüntü tablosu
         show = view.copy()
-        show["Vade Tarihi"] = pd.to_datetime(show["Vade Tarihi"]).dt.strftime("%d/%m/%Y")
+        show["Vade Tarihi"] = pd.to_datetime(show["Vade Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
         show["Tutar"] = show["Tutar_num"].map(lambda x: f"{float(x):,.2f} USD")
-        cols = ["Müşteri Adı","Ülke","Satış Temsilcisi","Fatura No","Vade Tarihi","Kalan Gün","Tutar","Ödendi"]
+        # (İstersen 'Ödendi' yerine işaret göstermek için show['Ödendi Gösterim'] = show['Ödendi_bool'].map({True:'✅', False:'❌'}) ekleyebilirsin)
+        cols = ["Müşteri Adı","Ülke","Satış Temsilcisi","Fatura No","Vade Tarihi","Kalan Gün","Tutar","Ödendi_bool"]
         cols = [c for c in cols if c in show.columns]
-        st.dataframe(show[cols].sort_values(["Kalan Gün","Vade Tarihi"]), use_container_width=True)
+        st.dataframe(show[cols].rename(columns={"Ödendi_bool":"Ödendi"}).sort_values(["Kalan Gün","Vade Tarihi"]), use_container_width=True)
 
         st.markdown("#### Ödeme Durumu Güncelle")
         if not view.empty:
-            # ID yoksa güvenli seçim için bir satır anahtarı oluşturalım
-            view = view.reset_index(drop=False).rename(columns={"index":"_row"})
+            # df_evrak'ın orijinal indexini saklayarak seçim yaptır (güncellemeyi doğru satıra yazmak için)
+            sel_df = view.reset_index(drop=False).rename(columns={"index":"_row"})  # _row = df_evrak'taki orijinal index
             sec = st.selectbox(
                 "Kayıt Seç",
-                options=view["_row"].tolist(),
-                format_func=lambda i: f"{view.loc[view['_row']==i,'Müşteri Adı'].values[0]} | {view.loc[view['_row']==i,'Fatura No'].values[0]}"
+                options=sel_df["_row"].tolist(),
+                format_func=lambda i: f"{sel_df.loc[sel_df['_row']==i,'Müşteri Adı'].values[0]} | {sel_df.loc[sel_df['_row']==i,'Fatura No'].values[0]}"
             )
 
-            odendi_mi = st.checkbox("Ödendi olarak işaretle")
+            # Seçili kaydın mevcut ödendi değeri
+            current_paid = bool(sel_df.loc[sel_df["_row"] == sec, "Ödendi_bool"].values[0])
+            odendi_mi = st.checkbox("Ödendi olarak işaretle", value=current_paid)
+
             if st.button("Kaydet / Güncelle"):
                 # Ana df_evrak’taki satıra yaz
-                # _row önceki index, aynı sırayı df_evrak’ta güncellemek için kullanıyoruz
-                ana_index = view.loc[view["_row"] == sec, "_row"].values[0]
+                ana_index = int(sec)
                 df_evrak.at[ana_index, "Ödendi"] = bool(odendi_mi)
+                # İsteğe bağlı: Vade Tarihi ya da diğer alanları da eş zamanlı güncellemek istersen buraya ekleyebilirsin.
                 update_sheets()
                 st.success("Ödeme durumu güncellendi!")
                 st.rerun()
+
+
 # ===========================
 # --- ETA TAKİBİ MENÜSÜ ---
 # ===========================
