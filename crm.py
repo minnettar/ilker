@@ -1349,26 +1349,30 @@ elif menu == "Proforma Takibi":
 
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Proforma Takibi</h2>", unsafe_allow_html=True)
 
-    # ---- Drive klasör ID'leri (üstten tanımlıysa onları, yoksa EVRAK_KLASOR_ID'yi kullan) ----
-    PROFORMA_PDF_FOLDER_ID   = globals().get("PROFORMA_PDF_FOLDER_ID", globals().get("EVRAK_KLASOR_ID"))
-    SIPARIS_FORMU_FOLDER_ID  = globals().get("SIPARIS_FORMU_FOLDER_ID", globals().get("EVRAK_KLASOR_ID"))
+    # ---- Drive klasör ID'leri ----
+    PROFORMA_PDF_FOLDER_ID  = globals().get("PROFORMA_PDF_ID",  globals().get("EVRAK_KLASOR_ID", ""))
+    SIPARIS_FORMU_FOLDER_ID = globals().get("SIPARIS_FORMU_ID", globals().get("EVRAK_KLASOR_ID", ""))
 
     # ---- Kolon güvenliği + ID backfill ----
-    gerekli = ["ID","Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama","Durum","PDF",
-               "Vade (gün)","Sevk Durumu","Ülke","Satış Temsilcisi","Ödeme Şekli","Termin Tarihi","Ulaşma Tarihi","Sipariş Formu"]
+    gerekli = [
+        "ID","Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama","Durum","PDF",
+        "Vade (gün)","Sevk Durumu","Ülke","Satış Temsilcisi","Ödeme Şekli",
+        "Termin Tarihi","Sevk Tarihi","Ulaşma Tarihi","Sipariş Formu"
+    ]
     for c in gerekli:
         if c not in df_proforma.columns:
             df_proforma[c] = ""
-    mask_bos_id = df_proforma["ID"].astype(str).str.strip().isin(["","nan"])
+    mask_bos_id = df_proforma["ID"].astype(str).str.strip().isin(["", "nan"])
     if mask_bos_id.any():
         df_proforma.loc[mask_bos_id, "ID"] = [str(uuid.uuid4()) for _ in range(mask_bos_id.sum())]
-        update_excel()
+        update_google_sheets()
 
     # --- Akıllı sayı dönüştürücü (toplamlar için) ---
     def smart_to_num(x):
         if pd.isna(x): return 0.0
         s = str(x).strip()
-        for sym in ["USD","$","€","EUR","₺","TL","tl","Tl"]: s = s.replace(sym,"")
+        for sym in ["USD","$","€","EUR","₺","TL","tl","Tl"]:
+            s = s.replace(sym, "")
         s = s.replace("\u00A0","").replace(" ","")
         try: return float(s)
         except: pass
@@ -1377,21 +1381,21 @@ elif menu == "Proforma Takibi":
             except: pass
         return 0.0
 
-    # --- Güvenli silme ---
-    def güvenli_sil(path, tekrar=5, bekle=1):
-        for _ in range(tekrar):
-            try:
-                os.remove(path); return True
-            except PermissionError:
-                time.sleep(bekle)
-            except FileNotFoundError:
-                return True
-        return False
+    # Küçük yardımcılar
+    def _safe_date_str(v, fmt="%d/%m/%Y"):
+        try:
+            dt = pd.to_datetime(v, errors="coerce")
+            if pd.isna(dt): return ""
+            return dt.strftime(fmt)
+        except Exception:
+            return ""
 
     # ---------- ÜST ÖZET: Bekleyen Proformalar ----------
     pview = df_proforma.copy()
     pview["Tarih"] = pd.to_datetime(pview["Tarih"], errors="coerce")
-    beklemede_kayitlar = pview[pview["Durum"] == "Beklemede"].sort_values(["Tarih","Müşteri Adı"], ascending=[False, True])
+    beklemede_kayitlar = pview[pview["Durum"] == "Beklemede"].sort_values(
+        ["Tarih","Müşteri Adı"], ascending=[False, True]
+    )
     toplam_bekleyen = float(beklemede_kayitlar["Tutar"].apply(smart_to_num).sum())
 
     st.subheader("Bekleyen Proformalar")
@@ -1419,17 +1423,17 @@ elif menu == "Proforma Takibi":
             default_odeme     = musteri_info["Ödeme Şekli"].values[0] if not musteri_info.empty else ""
 
             with st.form("add_proforma"):
-                tarih      = st.date_input("Tarih", value=datetime.date.today())
-                proforma_no= st.text_input("Proforma No")
-                tutar      = st.text_input("Tutar ($)")
-                vade_gun   = st.text_input("Vade (gün)")
-                ulke       = st.text_input("Ülke", value=default_ulke, disabled=True)
-                temsilci   = st.text_input("Satış Temsilcisi", value=default_temsilci, disabled=True)
-                odeme      = st.text_input("Ödeme Şekli", value=default_odeme, disabled=True)
-                aciklama   = st.text_area("Açıklama")
-                durum      = st.selectbox("Durum", ["Beklemede","İptal","Faturası Kesildi","Siparişe Dönüştü"], index=0)
-                pdf_file   = st.file_uploader("Proforma PDF", type="pdf")
-                submitted  = st.form_submit_button("Kaydet")
+                tarih       = st.date_input("Tarih", value=datetime.date.today())
+                proforma_no = st.text_input("Proforma No")
+                tutar       = st.text_input("Tutar ($)")
+                vade_gun    = st.text_input("Vade (gün)")
+                ulke        = st.text_input("Ülke", value=default_ulke, disabled=True)
+                temsilci    = st.text_input("Satış Temsilcisi", value=default_temsilci, disabled=True)
+                odeme       = st.text_input("Ödeme Şekli", value=default_odeme, disabled=True)
+                aciklama    = st.text_area("Açıklama")
+                durum       = st.selectbox("Durum", ["Beklemede","İptal","Faturası Kesildi","Siparişe Dönüştü"], index=0)
+                pdf_file    = st.file_uploader("Proforma PDF", type="pdf")
+                submitted   = st.form_submit_button("Kaydet")
 
                 if submitted:
                     if not proforma_no.strip() or not vade_gun.strip():
@@ -1442,12 +1446,13 @@ elif menu == "Proforma Takibi":
                             pdf_link = ""
                             if pdf_file and PROFORMA_PDF_FOLDER_ID:
                                 fname = f"{musteri_sec}_{tarih}_{proforma_no}.pdf"
-                                tmp = os.path.join(".", fname)
-                                with open(tmp,"wb") as f: f.write(pdf_file.read())
-                                gfile = drive.CreateFile({'title': fname, 'parents':[{'id': PROFORMA_PDF_FOLDER_ID}]})
-                                gfile.SetContentFile(tmp); gfile.Upload()
-                                pdf_link = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
-                                güvenli_sil(tmp)
+                                tmp_path = os.path.join(".", fname)
+                                with open(tmp_path, "wb") as f:
+                                    f.write(pdf_file.read())
+                                # Google Drive API helper'ı kullan
+                                pdf_link = upload_file_to_drive(PROFORMA_PDF_FOLDER_ID, tmp_path, fname)
+                                try: os.remove(tmp_path)
+                                except: pass
 
                             new_row = {
                                 "ID": str(uuid.uuid4()),
@@ -1465,32 +1470,40 @@ elif menu == "Proforma Takibi":
                                 "Sipariş Formu": "",
                                 "Sevk Durumu": "",
                                 "Termin Tarihi": "",
+                                "Sevk Tarihi": "",
                                 "Ulaşma Tarihi": ""
                             }
                             df_proforma = pd.concat([df_proforma, pd.DataFrame([new_row])], ignore_index=True)
-                            update_excel()
+                            update_google_sheets()
                             st.success("Proforma eklendi!")
                             st.rerun()
 
         # ============== ESKİ KAYIT / DÜZENLE / SİL / SİPARİŞE DÖNÜŞTÜR ==============
         elif islem == "Eski Kayıt / Düzenle":
-            # Seçilen müşterinin beklemede + diğer durumları
             kayitlar = df_proforma[df_proforma["Müşteri Adı"] == musteri_sec].copy()
             if kayitlar.empty:
                 st.info("Bu müşteriye ait proforma kaydı yok.")
             else:
                 kayitlar["Tarih"] = pd.to_datetime(kayitlar["Tarih"], errors="coerce")
+                g = kayitlar.sort_values("Tarih", ascending=False).copy()
+                g["Tarih"] = g["Tarih"].apply(lambda x: _safe_date_str(x))
                 st.dataframe(
-                    kayitlar.sort_values("Tarih", ascending=False)[
-                        ["Müşteri Adı","Proforma No","Tarih","Tutar","Durum","Vade (gün)","Sevk Durumu"]
-                    ],
+                    g[["Müşteri Adı","Proforma No","Tarih","Tutar","Durum","Vade (gün)","Sevk Durumu"]],
                     use_container_width=True
                 )
+
+                # ID tabanlı güvenli seçim (format_func NaT güvenli)
+                def _fmt(_id: str) -> str:
+                    row = kayitlar.loc[kayitlar["ID"] == _id]
+                    if row.empty: return _id
+                    pno  = str(row["Proforma No"].values[0])
+                    trh  = _safe_date_str(row["Tarih"].values[0])
+                    return f"{pno} | {trh}"
 
                 sec_id = st.selectbox(
                     "Proforma Seç",
                     options=kayitlar["ID"].tolist(),
-                    format_func=lambda _id: f"{kayitlar.loc[kayitlar['ID']==_id,'Proforma No'].values[0]} | {kayitlar.loc[kayitlar['ID']==_id,'Tarih'].dt.strftime('%d/%m/%Y').values[0] if pd.notna(kayitlar.loc[kayitlar['ID']==_id,'Tarih'].values[0]) else ''}"
+                    format_func=_fmt
                 )
 
                 orj_mask = (df_proforma["ID"] == sec_id)
@@ -1500,19 +1513,37 @@ elif menu == "Proforma Takibi":
                     idx = df_proforma.index[orj_mask][0]
                     kayit = df_proforma.loc[idx]
 
-                    if str(kayit.get("PDF","")).strip():
-                        st.markdown(f"**Proforma PDF:** [Görüntüle]({kayit['PDF']})", unsafe_allow_html=True)
+                    mevcut_pdf = str(kayit.get("PDF","")).strip()
+                    if mevcut_pdf:
+                        st.markdown(f"**Proforma PDF:** [Görüntüle]({mevcut_pdf})", unsafe_allow_html=True)
 
                     with st.form("edit_proforma"):
-                        tarih_      = st.date_input("Tarih", value=(pd.to_datetime(kayit["Tarih"], errors="coerce").date() if pd.notna(pd.to_datetime(kayit["Tarih"], errors="coerce")) else datetime.date.today()))
-                        proforma_no_= st.text_input("Proforma No", value=str(kayit["Proforma No"]))
-                        tutar_      = st.text_input("Tutar ($)", value=str(kayit["Tutar"]))
-                        vade_gun_   = st.text_input("Vade (gün)", value=str(kayit["Vade (gün)"]))
-                        aciklama_   = st.text_area("Açıklama", value=str(kayit["Açıklama"]))
-                        durum_      = st.selectbox("Durum", ["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"],
-                                                    index=["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"].index(kayit["Durum"]) if kayit["Durum"] in ["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"] else 0)
-                        termin_     = st.date_input("Termin Tarihi", value=(pd.to_datetime(kayit.get("Termin Tarihi",""), errors="coerce").date() if pd.notna(pd.to_datetime(kayit.get("Termin Tarihi",""), errors="coerce")) else datetime.date.today()), key="termin_inp")
-                        pdf_yeni    = st.file_uploader("Proforma PDF (güncelle - opsiyonel)", type="pdf")
+                        tarih_       = st.date_input(
+                            "Tarih",
+                            value=(pd.to_datetime(kayit["Tarih"], errors="coerce").date()
+                                   if pd.notna(pd.to_datetime(kayit["Tarih"], errors="coerce"))
+                                   else datetime.date.today())
+                        )
+                        proforma_no_ = st.text_input("Proforma No", value=str(kayit["Proforma No"]))
+                        tutar_       = st.text_input("Tutar ($)", value=str(kayit["Tutar"]))
+                        vade_gun_    = st.text_input("Vade (gün)", value=str(kayit["Vade (gün)"]))
+                        aciklama_    = st.text_area("Açıklama", value=str(kayit["Açıklama"]))
+                        durum_       = st.selectbox(
+                            "Durum",
+                            ["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"],
+                            index=(["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"].index(kayit["Durum"])
+                                   if kayit["Durum"] in ["Beklemede","Siparişe Dönüştü","İptal","Faturası Kesildi"] else 0)
+                        )
+                        termin_      = st.date_input(
+                            "Termin Tarihi",
+                            value=(
+                                pd.to_datetime(kayit.get("Termin Tarihi",""), errors="coerce").date()
+                                if pd.notna(pd.to_datetime(kayit.get("Termin Tarihi",""), errors="coerce"))
+                                else datetime.date.today()
+                            ),
+                            key=f"termin_inp_{sec_id}"
+                        )
+                        pdf_yeni     = st.file_uploader("Proforma PDF (güncelle - opsiyonel)", type="pdf", key=f"prpdf_{sec_id}")
                         colu, colm, cols = st.columns(3)
                         guncelle = colu.form_submit_button("Güncelle")
                         donustur = colm.form_submit_button("Siparişe Dönüştür (+ Sipariş Formu)")
@@ -1520,25 +1551,27 @@ elif menu == "Proforma Takibi":
 
                     # --- GÜNCELLE ---
                     if guncelle:
-                        pdf_final = str(kayit.get("PDF",""))
+                        pdf_final = mevcut_pdf
                         if pdf_yeni and PROFORMA_PDF_FOLDER_ID:
                             fname = f"{musteri_sec}_{tarih_}_{proforma_no_}.pdf"
-                            tmp = os.path.join(".", fname)
-                            with open(tmp,"wb") as f: f.write(pdf_yeni.read())
-                            gfile = drive.CreateFile({'title': fname, 'parents':[{'id': PROFORMA_PDF_FOLDER_ID}]})
-                            gfile.SetContentFile(tmp); gfile.Upload()
-                            pdf_final = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
-                            güvenli_sil(tmp)
+                            tmp_path = os.path.join(".", fname)
+                            with open(tmp_path, "wb") as f:
+                                f.write(pdf_yeni.read())
+                            pdf_final = upload_file_to_drive(PROFORMA_PDF_FOLDER_ID, tmp_path, fname)
+                            try: os.remove(tmp_path)
+                            except: pass
 
-                        df_proforma.at[idx, "Tarih"] = tarih_
+                        df_proforma.at[idx, "Tarih"]       = tarih_
                         df_proforma.at[idx, "Proforma No"] = proforma_no_
-                        df_proforma.at[idx, "Tutar"] = tutar_
-                        df_proforma.at[idx, "Vade (gün)"] = vade_gun_
-                        df_proforma.at[idx, "Açıklama"] = aciklama_
-                        df_proforma.at[idx, "Durum"] = durum_ if durum_ != "Siparişe Dönüştü" else df_proforma.at[idx, "Durum"]
+                        df_proforma.at[idx, "Tutar"]       = tutar_
+                        df_proforma.at[idx, "Vade (gün)"]  = vade_gun_
+                        df_proforma.at[idx, "Açıklama"]    = aciklama_
+                        # Durum "Siparişe Dönüştür" butonuyla set ediliyor; burada yalnızca diğerlerini yazalım
+                        if durum_ != "Siparişe Dönüştü":
+                            df_proforma.at[idx, "Durum"] = durum_
                         df_proforma.at[idx, "Termin Tarihi"] = termin_
                         df_proforma.at[idx, "PDF"] = pdf_final
-                        update_excel()
+                        update_google_sheets()
                         st.success("Proforma güncellendi!")
                         st.rerun()
 
@@ -1554,27 +1587,26 @@ elif menu == "Proforma Takibi":
                                 st.error("Sipariş formu yüklenmeli.")
                             else:
                                 sf_name = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-                                tmp = os.path.join(".", sf_name)
-                                with open(tmp,"wb") as f: f.write(siparis_formu_file.read())
-                                gfile = drive.CreateFile({'title': sf_name, 'parents':[{'id': SIPARIS_FORMU_FOLDER_ID}]})
-                                gfile.SetContentFile(tmp); gfile.Upload()
-                                sf_url = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
-                                güvenli_sil(tmp)
+                                tmp_path = os.path.join(".", sf_name)
+                                with open(tmp_path, "wb") as f:
+                                    f.write(siparis_formu_file.read())
+                                sf_url = upload_file_to_drive(SIPARIS_FORMU_FOLDER_ID, tmp_path, sf_name)
+                                try: os.remove(tmp_path)
+                                except: pass
 
                                 df_proforma.at[idx, "Sipariş Formu"] = sf_url
-                                df_proforma.at[idx, "Durum"] = "Siparişe Dönüştü"
-                                df_proforma.at[idx, "Sevk Durumu"] = ""   # sevk akışı diğer menülerde
-                                update_excel()
+                                df_proforma.at[idx, "Durum"]         = "Siparişe Dönüştü"
+                                df_proforma.at[idx, "Sevk Durumu"]   = ""   # sevk akışı diğer menülerde
+                                update_google_sheets()
                                 st.success("Sipariş formu kaydedildi ve durum 'Siparişe Dönüştü' olarak güncellendi!")
                                 st.rerun()
 
                     # --- SİL ---
                     if sil:
                         df_proforma = df_proforma.drop(idx).reset_index(drop=True)
-                        update_excel()
+                        update_google_sheets()
                         st.success("Kayıt silindi!")
                         st.rerun()
-
 
 ### ===========================
 ### --- GÜNCEL SİPARİŞ DURUMU (ID tabanlı) ---
