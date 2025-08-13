@@ -395,149 +395,72 @@ menu = st.session_state.menu_state
 # ========= /ŞIK MENÜ =========
 
 
-### ===========================
-### === ÖZET MENÜ (Vade Durumu Dahil) ===
-### ===========================
+# ===========================
+# === ÖZET EKRAN MENÜSÜ ===
+# ===========================
 
-if menu == "Özet Ekran":
-    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ŞEKEROĞLU İHRACAT CRM - Özet Ekran</h2>", unsafe_allow_html=True)
+elif menu == "Özet Ekran":
+    st.markdown("<h2 style='color:#8e44ad; font-weight:bold;'>ŞEKEROĞLU İHRACAT CRM - Özet Ekran</h2>", unsafe_allow_html=True)
 
     # ---------- Güvenli tutar dönüştürücü ----------
     def smart_to_num(x):
-        if pd.isna(x): 
+        if pd.isna(x):
             return 0.0
         s = str(x).strip()
         for sym in ["USD", "$", "€", "EUR", "₺", "TL", "tl", "Tl"]:
             s = s.replace(sym, "")
         s = s.replace("\u00A0", "").replace(" ", "")
         try:
-            return float(s)
-        except:
+            return float(s)  # US format
+        except Exception:
             pass
         if "," in s:
             try:
-                return float(s.replace(".", "").replace(",", "."))
-            except:
+                return float(s.replace(".", "").replace(",", "."))  # EU format
+            except Exception:
                 pass
         return 0.0
 
     # ---------- Toplam Fatura ----------
-    toplam_fatura_tutar = 0.0
-    if "Tutar" in df_evrak.columns and not df_evrak.empty:
-        df_evrak = df_evrak.copy()
-        df_evrak["Tutar_num"] = df_evrak["Tutar"].apply(smart_to_num).fillna(0.0)
-        toplam_fatura_tutar = float(df_evrak["Tutar_num"].sum())
-    st.markdown(f"<div style='font-size:1.5em; color:#d35400; font-weight:bold;'>💵 Toplam Fatura Tutarı: {toplam_fatura_tutar:,.2f} USD</div>", unsafe_allow_html=True)
+    if "Tutar" not in df_evrak.columns:
+        df_evrak["Tutar"] = ""
+
+    df_evrak = df_evrak.copy()
+    df_evrak["Tutar_num"] = df_evrak["Tutar"].apply(smart_to_num).fillna(0.0)
+
+    toplam_fatura_tutar = float(df_evrak["Tutar_num"].sum())
+    st.markdown(
+        f"<div style='font-size:1.5em; color:#d35400; font-weight:bold;'>💵 Toplam Fatura Tutarı: {toplam_fatura_tutar:,.2f} USD</div>",
+        unsafe_allow_html=True
+    )
 
     # ---------- Vade Durumu Kutucukları ----------
+    # Eksik kolonları garanti et
     for col in ["Vade Tarihi", "Ödendi"]:
         if col not in df_evrak.columns:
             df_evrak[col] = "" if col == "Vade Tarihi" else False
 
+    df_evrak["Ödendi"] = df_evrak["Ödendi"].fillna(False).astype(bool)
     vade_ts = pd.to_datetime(df_evrak["Vade Tarihi"], errors="coerce")
     today_norm = pd.Timestamp.today().normalize()
 
-    od_me = ~df_evrak["Ödendi"].astype(bool)
-    vadesi_gelmemis_m = (vade_ts > today_norm) & od_me
-    vadesi_bugun_m     = (vade_ts.dt.date == today_norm.date()) & od_me
-    gecikmis_m         = (vade_ts < today_norm) & od_me
+    odenmemis_mask = ~df_evrak["Ödendi"]
 
-    tg_sum = float(df_evrak.loc[vadesi_gelmemis_m, "Tutar_num"].sum())
-    tb_sum = float(df_evrak.loc[vadesi_bugun_m, "Tutar_num"].sum())
+    # Filtreler
+    vadesi_gelmemis_m = (vade_ts > today_norm) & odenmemis_mask
+    vadesi_bugun_m     = (vade_ts.dt.date == today_norm.date()) & odenmemis_mask
+    gecikmis_m         = (vade_ts < today_norm) & odenmemis_mask
+
+    # Toplamlar
+    tg_sum  = float(df_evrak.loc[vadesi_gelmemis_m, "Tutar_num"].sum())
+    tb_sum  = float(df_evrak.loc[vadesi_bugun_m, "Tutar_num"].sum())
     gec_sum = float(df_evrak.loc[gecikmis_m, "Tutar_num"].sum())
 
+    # Kartlar
     c1, c2, c3 = st.columns(3)
     c1.metric("📅 Vadesi Gelmemiş", f"{tg_sum:,.2f} USD", f"{int(vadesi_gelmemis_m.sum())} Fatura")
     c2.metric("⚠️ Bugün Vadesi Dolan", f"{tb_sum:,.2f} USD", f"{int(vadesi_bugun_m.sum())} Fatura")
     c3.metric("⛔ Gecikmiş", f"{gec_sum:,.2f} USD", f"{int(gecikmis_m.sum())} Fatura")
-
-    st.markdown("---")
-
-    # ---- Bekleyen Teklifler ----
-    st.markdown("### 💰 Bekleyen Teklifler")
-    bekleyen_teklifler = df_teklif[df_teklif["Durum"] == "Açık"] if "Durum" in df_teklif.columns else pd.DataFrame()
-    try:
-        toplam_teklif = pd.to_numeric(bekleyen_teklifler["Tutar"], errors="coerce").sum()
-    except:
-        toplam_teklif = 0
-    st.markdown(f"<div style='font-size:1.3em; color:#11998e; font-weight:bold;'>Toplam: {toplam_teklif:,.2f} $</div>", unsafe_allow_html=True)
-    if bekleyen_teklifler.empty:
-        st.info("Bekleyen teklif yok.")
-    else:
-        st.dataframe(bekleyen_teklifler[["Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama"]], use_container_width=True)
-
-    # ---- Bekleyen Proformalar ----
-    st.markdown("### 📄 Bekleyen Proformalar")
-    bekleyen_proformalar = df_proforma[df_proforma["Durum"] == "Beklemede"] if "Durum" in df_proforma.columns else pd.DataFrame()
-    try:
-        toplam_proforma = pd.to_numeric(bekleyen_proformalar["Tutar"], errors="coerce").sum()
-    except:
-        toplam_proforma = 0
-    st.markdown(f"<div style='font-size:1.3em; color:#f7971e; font-weight:bold;'>Toplam: {toplam_proforma:,.2f} $</div>", unsafe_allow_html=True)
-    if bekleyen_proformalar.empty:
-        st.info("Bekleyen proforma yok.")
-    else:
-        st.dataframe(bekleyen_proformalar[["Müşteri Adı", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]], use_container_width=True)
-
-    # ---- Sevk Bekleyen Siparişler ----
-    st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
-    if "Sevk Durumu" not in df_proforma.columns:
-        df_proforma["Sevk Durumu"] = ""
-    if "Ülke" not in df_proforma.columns:
-        df_proforma["Ülke"] = ""
-    sevk_bekleyenler = df_proforma[(df_proforma["Durum"] == "Siparişe Dönüştü") & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi", "Ulaşıldı"]))] if "Durum" in df_proforma.columns else pd.DataFrame()
-    try:
-        toplam_siparis = pd.to_numeric(sevk_bekleyenler["Tutar"], errors="coerce").sum()
-    except:
-        toplam_siparis = 0
-    st.markdown(f"<div style='font-size:1.3em; color:#185a9d; font-weight:bold;'>Toplam: {toplam_siparis:,.2f} $</div>", unsafe_allow_html=True)
-    if sevk_bekleyenler.empty:
-        st.info("Sevk bekleyen sipariş yok.")
-    else:
-        st.dataframe(sevk_bekleyenler[["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]], use_container_width=True)
-
-    # ---- Yolda Olan Siparişler ----
-    st.markdown("### ⏳ Yolda Olan (ETA Takibi) Siparişler")
-    eta_yolda = df_proforma[(df_proforma["Sevk Durumu"] == "Sevkedildi") & (~df_proforma["Sevk Durumu"].isin(["Ulaşıldı"]))] if "Sevk Durumu" in df_proforma.columns else pd.DataFrame()
-    try:
-        toplam_eta = pd.to_numeric(eta_yolda["Tutar"], errors="coerce").sum()
-    except:
-        toplam_eta = 0
-    st.markdown(f"<div style='font-size:1.3em; color:#c471f5; font-weight:bold;'>Toplam: {toplam_eta:,.2f} $</div>", unsafe_allow_html=True)
-    if eta_yolda.empty:
-        st.info("Yolda olan (sevk edilmiş) sipariş yok.")
-    else:
-        st.dataframe(eta_yolda[["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]], use_container_width=True)
-
-    # ---- Son Teslim Edilen Siparişler ----
-    st.markdown("### ✅ Son Teslim Edilen (Ulaşıldı) 5 Sipariş")
-    if "Sevk Durumu" in df_proforma.columns:
-        teslim_edilenler = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"]
-        if not teslim_edilenler.empty:
-            teslim_edilenler = teslim_edilenler.sort_values(by="Tarih", ascending=False).head(5)
-            st.dataframe(teslim_edilenler[["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]], use_container_width=True)
-        else:
-            st.info("Teslim edilmiş sipariş yok.")
-    else:
-        st.info("Teslim edilmiş sipariş yok.")
-
-    # ---- Vade Takibi Tablosu (HERKES GÖRÜR) ----
-    st.markdown("### 💸 Vadeli Fatura ve Tahsilat Takibi")
-    for col in ["Proforma No", "Vade (gün)", "Ödendi", "Ülke", "Satış Temsilcisi", "Ödeme Şekli"]:
-        if col not in df_evrak.columns:
-            df_evrak[col] = "" if col != "Ödendi" else False
-    df_evrak["Ödendi"] = df_evrak["Ödendi"].fillna(False).astype(bool)
-
-    vade_df = df_evrak[df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])].copy()
-    if vade_df.empty:
-        st.info("Açık vade kaydı yok.")
-    else:
-        vade_df["Vade Tarihi"] = pd.to_datetime(vade_df["Vade Tarihi"])
-        vade_df["Kalan Gün"] = (vade_df["Vade Tarihi"] - pd.to_datetime(datetime.date.today())).dt.days
-        st.dataframe(vade_df[["Müşteri Adı", "Ülke", "Fatura No", "Vade Tarihi", "Tutar", "Kalan Gün"]], use_container_width=True)
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.info("Daha detaylı işlem yapmak için sol menüden ilgili bölüme geçebilirsiniz.")
 
 
 ### ===========================
