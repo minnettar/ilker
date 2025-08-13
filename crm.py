@@ -2533,7 +2533,12 @@ elif menu == "ETA Takibi":
 # FUAR MÜŞTERİ KAYITLARI MENÜSÜ
 # ==============================
 
-# Gerekli kolonlar (eksikse ekle)
+# --- Session başlangıç değerleri ---
+if "current_fuar" not in st.session_state:
+    st.session_state.current_fuar = ""
+if "fuarlar_extra" not in st.session_state:
+    st.session_state.fuarlar_extra = set()  # df'e girmeyen, geçici eklenen fuarlar
+
 FUAR_KOLONLAR = [
     "Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail",
     "Satış Temsilcisi", "Açıklamalar", "Görüşme Kalitesi", "Tarih"
@@ -2542,28 +2547,56 @@ for c in FUAR_KOLONLAR:
     if c not in df_fuar_musteri.columns:
         df_fuar_musteri[c] = "" if c not in ["Görüşme Kalitesi", "Tarih"] else np.nan
 
+def _to_int_1_5(x, default=3):
+    v = pd.to_numeric(x, errors="coerce")
+    if pd.isna(v): return default
+    v = int(v)
+    return min(max(v, 1), 5)
+
+def _to_date(x, default=None):
+    if default is None:
+        default = datetime.date.today()
+    try:
+        ts = pd.to_datetime(x, errors="coerce")
+        return ts.date() if pd.notna(ts) else default
+    except Exception:
+        return default
+
 if menu == "Fuar Müşteri Kayıtları":
     st.markdown("<h2 style='color:#8e54e9; font-weight:bold; text-align:center;'>🎫 FUAR MÜŞTERİ KAYITLARI</h2>", unsafe_allow_html=True)
     st.info("Fuarlarda müşteri görüşmelerinizi hızlıca buraya ekleyin. Yeni kayıt oluşturun, mevcutları düzenleyin.")
 
     # --- Fuar seçimi / oluşturma ---
     mevcut_fuarlar = sorted([f for f in df_fuar_musteri["Fuar Adı"].dropna().unique() if str(f).strip() != ""])
+    # Session'da geçici eklenen fuarları da göster
+    tum_fuarlar = sorted(set(mevcut_fuarlar) | set(st.session_state.fuarlar_extra))
+
     col_f1, col_f2 = st.columns([2, 1])
     with col_f1:
-        fuar_adi = st.selectbox("Fuar Seçiniz", ["— Fuar Seçiniz —"] + mevcut_fuarlar, index=0)
-        fuar_adi = "" if fuar_adi == "— Fuar Seçiniz —" else fuar_adi
+        dd_items = ["— Fuar Seçiniz —"] + tum_fuarlar
+        # Varsayılan, session’daki current_fuar ise onu seçtirelim
+        idx = 0
+        if st.session_state.current_fuar and st.session_state.current_fuar in tum_fuarlar:
+            idx = dd_items.index(st.session_state.current_fuar) if st.session_state.current_fuar in dd_items else 0
+        fuar_adi_sel = st.selectbox("Fuar Seçiniz", dd_items, index=idx, key="fuar_dd")
+        fuar_adi = "" if fuar_adi_sel == "— Fuar Seçiniz —" else fuar_adi_sel
+        # Dropdowndan seçim yapınca current_fuar'ı güncelle
+        st.session_state.current_fuar = fuar_adi
     with col_f2:
         yeni_fuar = st.text_input("Yeni Fuar Adı (opsiyonel)")
         if st.button("Fuar Ekle"):
             y = yeni_fuar.strip()
             if not y:
                 st.warning("Fuar adı boş olamaz.")
-            elif y in mevcut_fuarlar:
-                st.info("Bu fuar zaten mevcut.")
-                fuar_adi = y
+            elif y in tum_fuarlar:
+                st.info("Bu fuar zaten listede.")
+                st.session_state.current_fuar = y
             else:
-                fuar_adi = y
+                # Geçici listeye ekle, seçili yap
+                st.session_state.fuarlar_extra.add(y)
+                st.session_state.current_fuar = y
                 st.success(f"Fuar eklendi: {y}")
+            st.rerun()
 
     secim = st.radio("İşlem Seçiniz:", ["Yeni Kayıt", "Eski Kayıt"], horizontal=True)
 
@@ -2571,24 +2604,32 @@ if menu == "Fuar Müşteri Kayıtları":
     if secim == "Yeni Kayıt":
         st.markdown("#### Yeni Fuar Müşteri Kaydı")
         with st.form("fuar_musteri_ekle"):
+            # Üstte seçilmiş fuar varsayılan gelir; istenirse burada değiştirilebilir
+            fuar_in_form = st.selectbox(
+                "Fuar Adı",
+                ["— Fuar Seçiniz —"] + tum_fuarlar,
+                index=(["— Fuar Seçiniz —"] + tum_fuarlar).index(st.session_state.current_fuar) if st.session_state.current_fuar in tum_fuarlar else 0
+            )
+            fuar_in_form = "" if fuar_in_form == "— Fuar Seçiniz —" else fuar_in_form
+
             musteri_adi = st.text_input("Müşteri Adı")
-            ulke = st.selectbox("Ülke Seçin", ulke_listesi)  # global listeden
+            ulke = st.selectbox("Ülke Seçin", ulke_listesi)  # global
             tel = st.text_input("Telefon")
             email = st.text_input("E-mail")
-            temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi)  # global listeden
+            temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi)  # global
             aciklama = st.text_area("Açıklamalar")
             gorusme_kalitesi = st.slider("Görüşme Kalitesi (1=Kötü, 5=Çok İyi)", 1, 5, 3)
             tarih = st.date_input("Tarih", value=datetime.date.today())
 
             kaydet = st.form_submit_button("Kaydet")
             if kaydet:
-                if not fuar_adi:
+                if not fuar_in_form:
                     st.warning("Lütfen bir fuar seçin veya ekleyin.")
                 elif not musteri_adi.strip():
                     st.warning("Müşteri adı gerekli.")
                 else:
                     yeni = {
-                        "Fuar Adı": fuar_adi,
+                        "Fuar Adı": fuar_in_form,
                         "Müşteri Adı": musteri_adi.strip(),
                         "Ülke": ulke,
                         "Telefon": tel.strip(),
@@ -2599,15 +2640,20 @@ if menu == "Fuar Müşteri Kayıtları":
                         "Tarih": tarih,
                     }
                     df_fuar_musteri = pd.concat([df_fuar_musteri, pd.DataFrame([yeni])], ignore_index=True)
+                    # Bu fuar artık df'de de var; gerekirse geçicilerden kaldır
+                    if fuar_in_form in st.session_state.fuarlar_extra:
+                        st.session_state.fuarlar_extra.discard(fuar_in_form)
+                    st.session_state.current_fuar = fuar_in_form
                     update_sheets()
                     st.success("Fuar müşterisi eklendi!")
                     st.rerun()
 
     # --- ESKİ KAYIT: listele / filtrele / düzenle / sil ---
     elif secim == "Eski Kayıt":
-        if not fuar_adi:
+        if not st.session_state.current_fuar:
             st.info("Önce bir fuar seçin.")
         else:
+            fuar_adi = st.session_state.current_fuar
             st.markdown(f"<h4 style='color:#4776e6;'>{fuar_adi} – Kayıtlar</h4>", unsafe_allow_html=True)
 
             fuar_df = df_fuar_musteri[df_fuar_musteri["Fuar Adı"] == fuar_adi].copy()
@@ -2638,12 +2684,12 @@ if menu == "Fuar Müşteri Kayıtları":
                 secili_index = st.selectbox(
                     "Düzenlemek/Silmek istediğiniz kaydı seçin:",
                     fuar_df.index,
-                    format_func=lambda i: f"{fuar_df.at[i, 'Müşteri Adı']} ({fuar_df.at[i, 'Tarih'].date() if pd.notnull(fuar_df.at[i, 'Tarih']) else ''})"
+                    format_func=lambda i: f"{fuar_df.at[i, 'Müşteri Adı']} ({_to_date(fuar_df.at[i, 'Tarih']).strftime('%d/%m/%Y')})"
                 )
 
                 # Detay formu
                 with st.form("kayit_duzenle"):
-                    musteri_adi = st.text_input("Müşteri Adı", value=str(fuar_df.at[secili_index, "Müşteri Adı"]))
+                    musteri_adi = st.text_input("Müşteri Adı", value=str(fuar_df.at[secili_index, "Müşteri Adı"] or ""))
                     u_val = fuar_df.at[secili_index, "Ülke"]
                     ulke = st.selectbox("Ülke", ulke_listesi, index=ulke_listesi.index(u_val) if u_val in ulke_listesi else ulke_listesi.index("Diğer"))
                     t_val = fuar_df.at[secili_index, "Satış Temsilcisi"]
@@ -2651,11 +2697,9 @@ if menu == "Fuar Müşteri Kayıtları":
                     tel = st.text_input("Telefon", value=str(fuar_df.at[secili_index, "Telefon"] or ""))
                     email = st.text_input("E-mail", value=str(fuar_df.at[secili_index, "E-mail"] or ""))
                     aciklama = st.text_area("Açıklamalar", value=str(fuar_df.at[secili_index, "Açıklamalar"] or ""))
-                    gk_raw = fuar_df.at[secili_index, "Görüşme Kalitesi"]
-                    gk_default = int(gk_raw) if pd.notnull(gk_raw) and str(gk_raw).isdigit() else 3
+                    gk_default = _to_int_1_5(fuar_df.at[secili_index, "Görüşme Kalitesi"], default=3)
                     gorusme_kalitesi = st.slider("Görüşme Kalitesi (1-5)", 1, 5, gk_default)
-                    t_raw = fuar_df.at[secili_index, "Tarih"]
-                    tarih = st.date_input("Tarih", value=(pd.to_datetime(t_raw).date() if pd.notnull(t_raw) else datetime.date.today()))
+                    tarih = st.date_input("Tarih", value=_to_date(fuar_df.at[secili_index, "Tarih"]))
 
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
@@ -2665,7 +2709,7 @@ if menu == "Fuar Müşteri Kayıtları":
 
                 # Güncelle
                 if guncelle:
-                    for k, v in {
+                    updates = {
                         "Müşteri Adı": musteri_adi.strip(),
                         "Ülke": ulke,
                         "Telefon": tel.strip(),
@@ -2674,7 +2718,8 @@ if menu == "Fuar Müşteri Kayıtları":
                         "Açıklamalar": aciklama.strip(),
                         "Görüşme Kalitesi": int(gorusme_kalitesi),
                         "Tarih": tarih,
-                    }.items():
+                    }
+                    for k, v in updates.items():
                         df_fuar_musteri.at[secili_index, k] = v
                     update_sheets()
                     st.success("Kayıt güncellendi!")
@@ -2694,7 +2739,6 @@ if menu == "Fuar Müşteri Kayıtları":
                     "Müşteri Adı", "Ülke", "Telefon", "E-mail",
                     "Satış Temsilcisi", "Açıklamalar", "Görüşme Kalitesi", "Tarih"
                 ]], use_container_width=True)
-
 # ===========================
 # === MEDYA ÇEKMECESİ MENÜSÜ ===
 # ===========================
