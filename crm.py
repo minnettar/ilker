@@ -156,7 +156,12 @@ def update_google_sheets():
     write_df("Evraklar",     df_evrak)
     write_df("ETA",          df_eta)
     write_df("FuarMusteri",  df_fuar_musteri)
-
+    
+# --- Eski çağrılar için uyumluluk köprüsü ---
+def update_excel():
+    """Eski kodda kalan update_excel() çağrılarını Sheets'e yönlendirir."""
+    update_google_sheets()
+    
 # ======================
 # 3b) DRIVE YARDIMCILARI
 # ======================
