@@ -399,7 +399,7 @@ menu = st.session_state.menu_state
 # === ÖZET EKRAN MENÜSÜ ===
 # ===========================
 
-elif menu == "Özet Ekran":
+if menu == "Özet Ekran":
     st.markdown("<h2 style='color:#8e44ad; font-weight:bold;'>ŞEKEROĞLU İHRACAT CRM - Özet Ekran</h2>", unsafe_allow_html=True)
 
     # ---------- Güvenli tutar dönüştürücü ----------
