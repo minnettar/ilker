@@ -91,7 +91,7 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 # ======================
 # 3) GOOGLE SHEETS & DRIVE BAĞLANTILARI
 # ======================
-SHEET_ID         = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQ"
+SHEET_ID         = "1nKuBKJPzpYC5TxNvc4G2OgI7miytuLBQE0n31I3yue0"
 FIYAT_TEKLIFI_ID = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
 PROFORMA_PDF_ID  = "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"
 SIPARIS_FORMU_ID = "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"
