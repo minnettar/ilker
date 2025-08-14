@@ -13,6 +13,9 @@ from googleapiclient.errors import HttpError
 import numpy as np
 import smtplib
 from email.message import EmailMessage
+import uuid
+
+
 
 # === Streamlit Ayarları ===
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
@@ -115,6 +118,32 @@ drive_service = build("drive", "v3", credentials=creds)
 # ======================
 # SHEETS <-> DATAFRAME YAZMA: GÜVENLİ SÜRÜM
 # ======================
+
+def ensure_id(df: pd.DataFrame, col: str = "ID") -> pd.DataFrame:
+    """
+    DataFrame'te 'ID' sütununu garanti eder.
+    Boş/nan olan ID'lere UUID atar. Ardından veriyi kalıcıya yazar (Sheets/Excel).
+    """
+    if df is None:
+        return pd.DataFrame({col: []})
+
+    if col not in df.columns:
+        df[col] = ""
+
+    mask = df[col].astype(str).str.strip().isin(["", "nan", "None"])
+    if mask.any():
+        df.loc[mask, col] = [str(uuid.uuid4()) for _ in range(mask.sum())]
+
+        # Kaydet (hangisi varsa onu kullan)
+        try:
+            update_google_sheets()   # Google Sheets kullananlar
+        except NameError:
+            try:
+                update_excel()  # Excel dosyasına yazanlar
+            except NameError:
+                pass
+
+    return df
 
 def _safe_str(x):
     import pandas as pd, datetime
