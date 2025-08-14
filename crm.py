@@ -145,6 +145,63 @@ def ensure_id(df: pd.DataFrame, col: str = "ID") -> pd.DataFrame:
 
     return df
 
+# ===========================
+# Seçim kutusu yardımcıları
+# ===========================
+
+def _make_label(row: pd.Series, cols: list[str]) -> str:
+    """Verilen sütunlardan insan-okur bir etiket üretir."""
+    bits = []
+    for c in cols:
+        if c in row and str(row[c]).strip():
+            bits.append(str(row[c]).strip())
+    return " — ".join(bits) if bits else f"ID:{row.get('ID','?')}"
+
+def id_selectbox(title: str,
+                 df: pd.DataFrame,
+                 label_cols: list[str],
+                 key: str | None = None,
+                 include_empty: bool = False,
+                 empty_text: str = "— Seçiniz —") -> str | None:
+    """
+    Ekranda label_cols birleşimi gösterir ama selectbox değeri olarak satırın ID'sini döndürür.
+    Dönüş: seçilen ID (str) ya da None.
+    """
+    if df is None or df.empty or "ID" not in df.columns:
+        return None
+
+    # ID -> Label haritası
+    labels = {row["ID"]: _make_label(row, label_cols) for _, row in df.iterrows()}
+
+    # Görünen seçeneklerin sırası için (etikete göre) sıralayalım
+    ordered = sorted(labels.items(), key=lambda kv: kv[1].lower())
+
+    options = [item[0] for item in ordered]                 # ID'ler
+    format_map = {item[0]: item[1] for item in ordered}     # ID -> Etiket
+
+    # Boş seçenek isteniyorsa başa yerleştir
+    if include_empty:
+        options = ["__EMPTY__"] + options
+        format_map["__EMPTY__"] = empty_text
+
+    selected = st.selectbox(
+        title,
+        options=options,
+        format_func=lambda _id: format_map.get(_id, str(_id)),
+        key=key
+    )
+
+    if include_empty and selected == "__EMPTY__":
+        return None
+    return selected
+
+def get_index_by_id(df: pd.DataFrame, rec_id: str) -> int | None:
+    """Verilen ID'nin DataFrame içindeki indeksini verir."""
+    if df is None or df.empty or "ID" not in df.columns:
+        return None
+    matches = df.index[df["ID"] == rec_id]
+    return int(matches[0]) if len(matches) else None
+
 def _safe_str(x):
     import pandas as pd, datetime
     if pd.isna(x):
