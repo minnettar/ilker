@@ -110,67 +110,46 @@ sheet = sheets_service.spreadsheets()
 drive_service = build("drive", "v3", credentials=creds)
 
 # ======================
-# SHEETS <-> DATAFRAME YAZMA: GÜVENLİ SÜRÜM
+# SHEETS <-> DATAFRAME YAZMA/OKUMA (KOTA DOSTU)
 # ======================
-def ensure_id(df: pd.DataFrame, col: str = "ID") -> pd.DataFrame:
-    """DF'te 'ID' sütununu garanti eder; boşları UUID ile doldurur."""
-    if df is None:
-        return pd.DataFrame({col: []})
-    if col not in df.columns:
-        df[col] = ""
-    mask = df[col].astype(str).str.strip().isin(["", "nan", "None"])
-    if mask.any():
-        df.loc[mask, col] = [str(uuid.uuid4()) for _ in range(mask.sum())]
+import time
+import random
+from googleapiclient.errors import HttpError
+
+# Hangi HTTP kodlarında tekrar deneyeceğiz
+RETRY_STATUS = {429, 500, 502, 503, 504}
+
+def _sheets_retry(callable_fn, *, max_tries=6, base=0.6, jitter=0.4, what="sheets"):
+    """
+    Google API çağrılarını 429/5xx/timeout durumlarında exponential backoff ile tekrar dener.
+    """
+    attempt = 0
+    while True:
         try:
-            update_google_sheets()
-        except NameError:
-            try:
-                update_excel()
-            except NameError:
-                pass
-    return df
+            return callable_fn()
+        except HttpError as he:
+            code = getattr(getattr(he, "resp", None), "status", None)
+            if code in RETRY_STATUS and attempt < max_tries - 1:
+                wait = base * (2 ** attempt) + random.uniform(0, jitter)
+                time.sleep(wait)
+                attempt += 1
+                continue
+            else:
+                raise
+        except Exception as e:
+            # Timeout / bağlantı aksaklıkları için de dene
+            msg = str(e).lower()
+            transient = any(k in msg for k in ["timed out", "timeout", "temporarily", "reset"])
+            if transient and attempt < max_tries - 1:
+                wait = base * (2 ** attempt) + random.uniform(0, jitter)
+                time.sleep(wait)
+                attempt += 1
+                continue
+            else:
+                raise
 
-# ---------------------------
-# Seçim kutusu yardımcıları
-# ---------------------------
-def _make_label(row: pd.Series, cols: list[str]) -> str:
-    parts = []
-    for c in cols:
-        if c in row and str(row[c]).strip():
-            parts.append(str(row[c]).strip())
-    return " — ".join(parts) if parts else f"ID:{row.get('ID','?')}"
-
-def id_selectbox(title: str,
-                 df: pd.DataFrame,
-                 label_cols: list[str],
-                 key: str | None = None,
-                 include_empty: bool = False,
-                 empty_text: str = "— Seçiniz —") -> str | None:
-    """Ekranda label cols gösterir, değer olarak satırın ID'sini döndürür."""
-    if df is None or df.empty or "ID" not in df.columns:
-        return None
-    labels = {row["ID"]: _make_label(row, label_cols) for _, row in df.iterrows()}
-    ordered = sorted(labels.items(), key=lambda kv: kv[1].lower())
-    options = [k for k, _ in ordered]
-    display = {k: v for k, v in ordered}
-    if include_empty:
-        options = ["__EMPTY__"] + options
-        display["__EMPTY__"] = empty_text
-    selected = st.selectbox(title, options=options, format_func=lambda _id: display.get(_id, str(_id)), key=key)
-    if include_empty and selected == "__EMPTY__":
-        return None
-    return selected
-
-def get_index_by_id(df: pd.DataFrame, rec_id: str) -> int | None:
-    if df is None or df.empty or "ID" not in df.columns:
-        return None
-    m = df.index[df["ID"] == rec_id]
-    return int(m[0]) if len(m) else None
-
-# ---------------------------
-# Sheets yazıcıları
-# ---------------------------
 def _safe_str(x):
+    import pandas as pd, datetime
     if pd.isna(x):
         return ""
     if isinstance(x, (pd.Timestamp, datetime.datetime, datetime.date)):
@@ -181,6 +160,8 @@ def _safe_str(x):
     return str(x)
 
 def df_to_values(df: pd.DataFrame):
+    """DataFrame'i Sheets'e uygun 2D listeye çevirir."""
+    import pandas as pd
     if not isinstance(df, pd.DataFrame):
         return [[]]
     if df.empty:
@@ -191,40 +172,100 @@ def df_to_values(df: pd.DataFrame):
         clean[c] = clean[c].map(_safe_str)
     return [clean.columns.tolist()] + clean.values.tolist()
 
+# ---- THROTTLE: Çok sık yazmayı boğma (örn. 1.2s)
+if "_last_sheet_write_ts" not in st.session_state:
+    st.session_state._last_sheet_write_ts = 0.0
+
+def _throttle(min_interval_sec=1.2):
+    now = time.time()
+    delta = now - st.session_state._last_sheet_write_ts
+    if delta < min_interval_sec:
+        time.sleep(min_interval_sec - delta)
+    st.session_state._last_sheet_write_ts = time.time()
+
 def write_df(sheet_name: str, df: pd.DataFrame, *, allow_clear_on_empty: bool = False):
-    """DF boşsa (ve clear istenmediyse) sayfayı SİLMEZ; veri varsa yazar."""
+    """
+    Kota dostu yazma:
+    - 'clear' YOK. Yalnızca A1'den itibaren 'update' yapar (tek istek).
+    - df boşsa ve allow_clear_on_empty=False ise hiç yazmaz (sayfayı korur).
+    - Eğer eski satırlar fazlalık kalırsa, periyodik bakımda 'clear' yapabilirsiniz (manuel).
+    """
     try:
+        import pandas as pd
         if not isinstance(df, pd.DataFrame):
-            print(f"[write_df] {sheet_name}: DataFrame değil -> atlandı")
+            print(f"[write_df] {sheet_name}: df DataFrame değil, atlandı.")
             return
+
         if df.empty and not allow_clear_on_empty:
-            print(f"[write_df] {sheet_name}: DF boş -> clear yapılmadı")
+            print(f"[write_df] {sheet_name}: DF boş → yazma atlandı (sayfa korundu).")
             return
+
         values = df_to_values(df)
-        sheet.values().clear(spreadsheetId=SHEET_ID, range=sheet_name).execute()
-        sheet.values().update(
-            spreadsheetId=SHEET_ID,
-            range=sheet_name,
-            valueInputOption="RAW",
-            body={"values": values}
-        ).execute()
-        print(f"[write_df] {sheet_name}: {len(df)} satır yazıldı")
+
+        def _do_update():
+            return sheet.values().update(
+                spreadsheetId=SHEET_ID,
+                range=f"{sheet_name}!A1",
+                valueInputOption="RAW",
+                body={"values": values}
+            ).execute()
+
+        _throttle()  # hız limitini delmemek için
+        _sheets_retry(_do_update, what=f"update:{sheet_name}")
+        print(f"[write_df] {sheet_name}: {len(df)} satır yazıldı (tek istek, clear yok).")
+
     except Exception as e:
         print(f"[write_df] '{sheet_name}' yazılırken hata: {e}")
 
 def update_google_sheets():
-    """Tüm sayfaları güvenle günceller (boş DF'ler sayfayı sıfırlamaz)."""
+    """
+    Tüm sayfaları kota dostu şekilde günceller (clear yok, tek tek update).
+    """
     write_df("Sayfa1",      df_musteri)
     write_df("Kayıtlar",    df_kayit)
     write_df("Teklifler",   df_teklif)
     write_df("Proformalar", df_proforma)
     write_df("Evraklar",    df_evrak)
-    write_df("ETA",         df_eta)
-    write_df("FuarMusteri", df_fuar_musteri)
+    write_df("ETA",         df_eta)           # boşsa yazmaz
+    write_df("FuarMusteri", df_fuar_musteri)  # boşsa yazmaz
 
-# Streamlit Cloud'da bazı menüler "update_sheets()" çağırıyorsa alias:
-def update_sheets():
-    update_google_sheets()
+def load_sheet_as_df(sheet_name, columns):
+    """
+    Okumayı da retry ile güvenceye alır.
+    """
+    try:
+        def _do_get():
+            return sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_name).execute()
+
+        ws = _sheets_retry(_do_get, what=f"get:{sheet_name}")
+        values = ws.get("values", [])
+        if not values:
+            return pd.DataFrame(columns=columns)
+
+        header = [h.strip() for h in values[0]]
+        data_rows = values[1:]
+
+        H = len(header)
+        fixed_rows = []
+        for r in data_rows:
+            r = list(r)
+            if len(r) < H:
+                r = r + [""] * (H - len(r))
+            elif len(r) > H:
+                r = r[:H]
+            fixed_rows.append(r)
+
+        df = pd.DataFrame(fixed_rows, columns=header)
+
+        # Eksik kolonları ekle
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+
+        return df[columns]
+    except Exception as e:
+        print(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
+        return pd.DataFrame(columns=columns)
 
 # ======================
 # 3b) DRIVE YARDIMCILARI
