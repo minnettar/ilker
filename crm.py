@@ -1873,27 +1873,54 @@ elif menu == "Güncel Sipariş Durumu":
     )
 
     # ================= Termin Tarihi Güncelle =================
-    st.markdown("#### Termin Tarihi Güncelle")
-    sec_id_termin = st.selectbox(
-        "Termin Tarihi Girilecek Sipariş",
-        options=siparisler["ID"].tolist(),
-        format_func=lambda _id: f"{siparisler.loc[siparisler['ID']==_id, 'Müşteri Adı'].values[0]} - {siparisler.loc[siparisler['ID']==_id, 'Proforma No'].values[0]}"
-    )
-    mask_termin = (df_proforma["ID"] == sec_id_termin)
+st.markdown("#### Termin Tarihi Güncelle")
+
+# ID kolonunu güvenli string yap (eşleşme hatalarını önler)
+if "ID" in df_proforma.columns:
+    df_proforma["ID"] = df_proforma["ID"].astype(str)
+
+sec_id_termin = st.selectbox(
+    "Termin Tarihi Girilecek Sipariş",
+    options=siparisler["ID"].astype(str).tolist(),
+    format_func=lambda _id: f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Müşteri Adı'].values[0]} - "
+                            f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Proforma No'].values[0]}"
+)
+
+# Seçilen kaydın mevcut termin tarihi -> varsayılan
+idx_list = df_proforma.index[df_proforma["ID"].astype(str) == str(sec_id_termin)].tolist()
+if idx_list:
+    idx0 = idx_list[0]
     try:
-        mevcut_termin_ts = pd.to_datetime(df_proforma.loc[mask_termin, "Termin Tarihi"].values[0], errors="coerce")
+        mevcut_termin_ts = pd.to_datetime(df_proforma.at[idx0, "Termin Tarihi"], errors="coerce")
         default_termin = mevcut_termin_ts.date() if pd.notna(mevcut_termin_ts) else datetime.date.today()
     except Exception:
         default_termin = datetime.date.today()
+else:
+    # Güvenli varsayılan (çok nadir: ID bulunamadı)
+    default_termin = datetime.date.today()
 
-    yeni_termin = st.date_input("Termin Tarihi", value=default_termin, key="termin_input")
+yeni_termin = st.date_input("Termin Tarihi", value=default_termin, key="termin_input")
 
-    if st.button("Termin Tarihini Kaydet"):
-        df_proforma.loc[mask_termin, "Termin Tarihi"] = yeni_termin
+if st.button("Termin Tarihini Kaydet"):
+    # 1) ID doğrulaması
+    idx_list = df_proforma.index[df_proforma["ID"].astype(str) == str(sec_id_termin)].tolist()
+    if not idx_list:
+        st.error("Seçilen sipariş ana tabloda bulunamadı (ID eşleşmedi). Lütfen sayfayı yenileyip tekrar deneyin.")
+        st.stop()
+
+    idx0 = idx_list[0]
+
+    # 2) Tarihi ISO string olarak yaz (tip sorunlarını önler)
+    iso_date = pd.to_datetime(yeni_termin).strftime("%Y-%m-%d")
+    df_proforma.at[idx0, "Termin Tarihi"] = iso_date
+
+    # 3) Sheets'e yaz ve sonucu kontrol et
+    try:
         update_google_sheets()
         st.success("Termin tarihi kaydedildi!")
         st.rerun()
-
+    except Exception as e:
+        st.error(f"Termin tarihi RAM’de güncellendi ancak Sheets yazımı başarısız oldu: {e}")
     # ================= Sevk Et (ETA’ya gönder) =================
     st.markdown("#### Siparişi Sevk Et (ETA Takibine Gönder)")
     sec_id_sevk = st.selectbox(
