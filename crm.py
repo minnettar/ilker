@@ -148,6 +148,22 @@ def _sheets_retry(callable_fn, *, max_tries=6, base=0.6, jitter=0.4, what="sheet
             else:
                 raise
 
+import uuid
+
+def ensure_id(df, id_col="ID"):
+    """
+    DataFrame'de belirtilen id_col sütunu yoksa ekler.
+    Boş olan ID hücrelerini uuid4 ile doldurur.
+    """
+    if id_col not in df.columns:
+        df[id_col] = ""
+
+    bos_id = df[id_col].astype(str).str.strip().isin(["", "nan", "None"])
+    if bos_id.any():
+        df.loc[bos_id, id_col] = [str(uuid.uuid4()) for _ in range(bos_id.sum())]
+
+    return df
+
 def _safe_str(x):
     import pandas as pd, datetime
     if pd.isna(x):
@@ -355,7 +371,8 @@ def load_sheet_as_df(sheet_name, columns):
         print(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
         return pd.DataFrame(columns=columns)
 
-# --- Tüm sayfaları yükle (KOLON İSİMLERİ DÜZELTİLDİ) ---
+# --- Tüm sayfaları yükle (KOLON İSİMLERİ DÜZELTİLDİ) --
+
 df_musteri = load_sheet_as_df("Sayfa1", [
     "Müşteri Adı","Telefon","E-posta","Adres","Ülke",
     "Satış Temsilcisi","Kategori","Durum","Vade (Gün)","Ödeme Şekli",
