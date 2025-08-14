@@ -1845,10 +1845,26 @@ elif menu == "Güncel Sipariş Durumu":
     siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce")
     siparisler = siparisler.sort_values(["Termin Tarihi Order","Tarih"], ascending=[True, True])
 
-    # ---- Görünüm için format (NaT güvenli)
+    # === Yardımcı: kolon isimlerini tekilleştir (ilkini koru, sonrakilere _1, _2 ekle)
+    def _dedup_cols(df: pd.DataFrame) -> pd.DataFrame:
+        counts = {}
+        new_names = []
+        for col in df.columns:
+            if col not in counts:
+                counts[col] = 0
+                new_names.append(col)          # ilk kolon adı korunur
+            else:
+                counts[col] += 1
+                new_names.append(f"{col}_{counts[col]}")  # sonraki kopyalara ek
+        out = df.copy()
+        out.columns = new_names
+        return out
+
+    # ---- Görünüm için format (NaT güvenli) + kolon adlarını tekilleştir
     g = siparisler.copy()
     g["Tarih"] = pd.to_datetime(g["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
     g["Termin Tarihi"] = pd.to_datetime(g["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+    g = _dedup_cols(g)  # <-- kritik satır: duplicate kolonları temizle
 
     st.markdown("<h4 style='color:#219A41; font-weight:bold;'>Tüm Siparişe Dönüşenler</h4>", unsafe_allow_html=True)
     st.dataframe(
@@ -1887,15 +1903,10 @@ elif menu == "Güncel Sipariş Durumu":
         key="sevk_sec"
     )
     if st.button("Sevkedildi → ETA'ya Ekle"):
-        # Proforma'dan bilgiler
         row = df_proforma.loc[df_proforma["ID"] == sec_id_sevk].iloc[0]
-
-        # ETA kolon güvenliği
         for col in ["Müşteri Adı","Proforma No","ETA Tarihi","Açıklama"]:
             if col not in df_eta.columns:
                 df_eta[col] = ""
-
-        # ETA'ya ekle (varsa güncelle)
         filt = (df_eta["Müşteri Adı"] == row["Müşteri Adı"]) & (df_eta["Proforma No"] == row["Proforma No"])
         if filt.any():
             df_eta.loc[filt, "Açıklama"] = row.get("Açıklama","")
@@ -1907,7 +1918,6 @@ elif menu == "Güncel Sipariş Durumu":
                 "Açıklama": row.get("Açıklama","")
             }])], ignore_index=True)
 
-        # Proforma'yı işaretle
         df_proforma.loc[df_proforma["ID"] == sec_id_sevk, "Sevk Durumu"] = "Sevkedildi"
         update_google_sheets()
         st.success("Sipariş sevkedildi ve ETA takibine gönderildi!")
@@ -1940,7 +1950,7 @@ elif menu == "Güncel Sipariş Durumu":
         if links:
             st.markdown(" - " + " | ".join(links), unsafe_allow_html=True)
 
-    # Toplam bekleyen sevk tutarı (çoklu para birimi güvenli parse)
+    # Toplam bekleyen sevk tutarı
     def smart_to_num(x):
         if pd.isna(x): return 0.0
         s = str(x).strip()
@@ -1963,6 +1973,7 @@ elif menu == "Güncel Sipariş Durumu":
         f"<div style='color:#219A41; font-weight:bold;'>*Toplam Bekleyen Sevk: {toplam:,.2f} $*</div>",
         unsafe_allow_html=True
     )
+    
 ### ===========================
 ### --- FATURA & İHRACAT EVRAKLARI MENÜSÜ (Cloud‑sağlam, ID + upsert) ---
 ### ===========================
