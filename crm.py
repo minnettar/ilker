@@ -445,6 +445,49 @@ def smart_to_num(x):
 if "Tutar" in df_evrak.columns and "Tutar_num" not in df_evrak.columns:
     df_evrak["Tutar_num"] = df_evrak["Tutar"].apply(smart_to_num).fillna(0.0)
 
+# ============ ID GÜVENCE BLOĞU (ensure_id + tüm df'lere uygula) ============
+
+import uuid
+import pandas as pd
+
+def ensure_id(df: pd.DataFrame, id_col: str = "ID") -> pd.DataFrame:
+    """
+    DataFrame'te id_col sütununu garanti eder; boş olan hücreleri uuid4 ile doldurur.
+    - df None ise boş bir DataFrame döner.
+    - Var olan 'ID' değerlerine dokunmaz.
+    - KOTA DOSTU: Sheets'e burada yazmaz; sadece df üzerinde çalışır.
+    """
+    if df is None:
+        return pd.DataFrame({id_col: []})
+
+    if id_col not in df.columns:
+        # Mevcut satır sayısına göre sütun oluştur
+        df[id_col] = ""
+
+    # Boş/NaN/None/whitespace ID'ler için uuid üret
+    mask = df[id_col].astype(str).str.strip().isin(["", "nan", "None"])
+    if mask.any():
+        df.loc[mask, id_col] = [str(uuid.uuid4()) for _ in range(mask.sum())]
+
+    return df
+
+# --- Tüm tablolar için ID'yi garanti et (load_sheet_as_df çağrılarından SONRA) ---
+df_musteri       = ensure_id(df_musteri)
+df_kayit         = ensure_id(df_kayit)
+df_teklif        = ensure_id(df_teklif)
+df_proforma      = ensure_id(df_proforma)
+df_evrak         = ensure_id(df_evrak)
+df_eta           = ensure_id(df_eta)
+df_fuar_musteri  = ensure_id(df_fuar_musteri)
+
+# (İsteğe bağlı) Burada istersen tek seferde kalıcıya yazabilirsin:
+# try:
+#     update_google_sheets()
+# except Exception as e:
+#     print(f"update_google_sheets() sırasında bilgi: {e}")
+
+# ============================================================================ 
+
 # ========= ŞIK SIDEBAR MENÜ (RADIO + ANINDA STATE) =========
 
 # 1) Menü tanımı (ikonlar)
