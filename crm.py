@@ -2795,36 +2795,86 @@ if menu == "Fuar Müşteri Kayıtları":
 
 elif menu == "Medya Çekmecesi":
     st.markdown("<h2 style='color:#8e54e9; font-weight:bold;'>Medya Çekmecesi</h2>", unsafe_allow_html=True)
-    st.info("Google Drive’daki medya, ürün görselleri, kalite evrakları ve arşiv klasörünü aşağıdaki sekmelerden görüntüleyebilirsiniz.")
+    st.info("Google Drive’daki medya, ürün görselleri, kalite evrakları ve arşiv klasörlerini buradan görüntüleyebilir ve Arşiv’e dosya yükleyebilirsiniz.")
 
-    # --- Klasör ID'leri ---
+    # --- Klasör ID'leri (görüntüleme) ---
     DRIVE_FOLDER_IDS = {
         "Genel Medya Klasörü": "1gFAaK-6v1e3346e-W0TsizOqSq43vHLY",
         "Ürün Görselleri":      "18NNlmadm5NNFkI1Amzt_YMwB53j6AmbD",
         "Kalite Evrakları":     "1pbArzYfA4Tp50zvdyTzSPF2ThrMWrGJc",
-        "📦 Arşiv":              "1uXq2OZxQaAT_dRoRCUa3w3BioudJ5m5A",  # <-- EKLENDİ
+        "Arşiv":                "1uXq2OZxQaAT_dRoRCUa3w3BioudJ5m5A",  # <- sizin arşiv klasör ID
     }
 
     def embed_url(folder_id: str) -> str:
-        # Grid görünüm istiyorsan '#grid' de kullanabilirsin
         return f"https://drive.google.com/embeddedfolderview?id={folder_id}#list"
 
     def open_url(folder_id: str) -> str:
         return f"https://drive.google.com/drive/folders/{folder_id}?usp=sharing"
 
+    # --- Yardımcılar (yükleme için) ---
+    try:
+        _ = _guess_mime_by_ext  # projede zaten varsa kullan
+    except NameError:
+        def _guess_mime_by_ext(filename: str) -> str:
+            ext = os.path.splitext(filename.lower())[1]
+            return {
+                ".pdf":  "application/pdf",
+                ".jpg":  "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png":  "image/png",
+                ".webp": "image/webp",
+                ".csv":  "text/csv",
+                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".xls":  "application/vnd.ms-excel",
+                ".txt":  "text/plain",
+            }.get(ext, "application/octet-stream")
+
+    try:
+        _ = _sanitize_filename
+    except NameError:
+        def _sanitize_filename(name: str) -> str:
+            keep = "-_.() "
+            s = "".join(ch if ch.isalnum() or ch in keep else "_" for ch in str(name))
+            return s[:180] if s else "dosya"
+
+    # Klasördeki mevcut dosya adlarını çek (duplike kontrolü için)
+    def _list_file_names_in_folder(folder_id: str) -> set[str]:
+        names = set()
+        page_token = None
+        while True:
+            resp = drive_service.files().list(
+                q=f"'{folder_id}' in parents and trashed = false",
+                fields="nextPageToken, files(id, name)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora="allDrives",
+                pageSize=1000,
+                pageToken=page_token
+            ).execute()
+            for f in resp.get("files", []):
+                names.add(f["name"])
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        return names
+
     # --- Gömülü görünüm yüksekliği ---
     h = st.slider("Gömülü görünüm yüksekliği (px)", min_value=450, max_value=900, value=600, step=50)
 
-    tabs = st.tabs(list(DRIVE_FOLDER_IDS.keys()))
-    for tab, tab_name in zip(tabs, DRIVE_FOLDER_IDS.keys()):
+    # Sekmeler
+    tab_names = list(DRIVE_FOLDER_IDS.keys())
+    tabs = st.tabs(tab_names)
+
+    for tab, tab_name in zip(tabs, tab_names):
         with tab:
             fid = DRIVE_FOLDER_IDS[tab_name]
+
+            # Gömülü liste + hızlı link
             st.markdown(
                 f"""
                 <iframe src="{embed_url(fid)}"
                         width="100%" height="{h}" frameborder="0"
-                        style="border:1px solid #eee; border-radius:12px; margin-top:10px;">
-                </iframe>
+                        style="border:1px solid #eee; border-radius:12px; margin-top:10px;"></iframe>
                 """,
                 unsafe_allow_html=True
             )
@@ -2832,7 +2882,84 @@ elif menu == "Medya Çekmecesi":
             with col_a:
                 st.link_button("🔗 Klasörü yeni sekmede aç", open_url(fid))
             with col_b:
-                st.info("Klasörlerin paylaşımı 'Bağlantıya sahip olan herkes görüntüleyebilir' olmalıdır; aksi halde içerik görünmez.")
+                st.caption("Gömülü listeden dosyaları görüntüleyebilirsiniz.")
+
+            # --- SADECE ARŞİV TABINDA YÜKLEME ---
+            if tab_name == "Arşiv":
+                st.markdown("#### 📤 Arşive Dosya Ekle")
+                st.caption("Aşağıdan bir veya daha fazla dosya seçip yükleyebilirsiniz. Aynı isimli dosyalar atlanır.")
+
+                uploads = st.file_uploader(
+                    "Dosyaları seçin",
+                    type=["pdf", "jpg", "jpeg", "png", "webp", "txt", "csv", "xlsx"],
+                    accept_multiple_files=True
+                )
+
+                if uploads:
+                    import tempfile
+                    from googleapiclient.http import MediaFileUpload
+
+                    # Klasördeki mevcut adlar (duplike isim skip)
+                    mevcut_isimler = _list_file_names_in_folder(fid)
+
+                    yuklenen = 0
+                    atlanan = 0
+                    detay_links = []
+
+                    for up in uploads:
+                        # Güvenli dosya adı
+                        clean_name = _sanitize_filename(up.name)
+                        if clean_name in mevcut_isimler:
+                            atlanan += 1
+                            continue
+
+                        # Geçici dosyaya yaz
+                        suffix = os.path.splitext(clean_name)[1] or ""
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fp:
+                            fp.write(up.read())
+                            temp_path = fp.name
+
+                        try:
+                            media = MediaFileUpload(temp_path, mimetype=_guess_mime_by_ext(clean_name), resumable=False)
+                            meta = {"name": clean_name, "parents": [fid]}
+                            created = drive_service.files().create(
+                                body=meta,
+                                media_body=media,
+                                fields="id",
+                                supportsAllDrives=True
+                            ).execute()
+                            file_id = created["id"]
+
+                            # İsteğe bağlı: herkese görüntüleme izni (gömülü zaten gösteriyor ama link için faydalı)
+                            try:
+                                drive_service.permissions().create(
+                                    fileId=file_id,
+                                    body={"role": "reader", "type": "anyone"},
+                                    fields="id"
+                                ).execute()
+                            except Exception:
+                                pass
+
+                            detay_links.append(f"https://drive.google.com/file/d/{file_id}/view?usp=sharing")
+                            mevcut_isimler.add(clean_name)
+                            yuklenen += 1
+                        finally:
+                            try:
+                                os.remove(temp_path)
+                            except Exception:
+                                pass
+
+                    if yuklenen:
+                        st.success(f"{yuklenen} dosya yüklendi.")
+                        if detay_links:
+                            for url in detay_links[:10]:
+                                st.write(f"• {url}")
+                            if len(detay_links) > 10:
+                                st.write("…")
+                        # Görünümü yenilemek isterseniz kullanıcıya sayfayı yeniden yükletin
+                        st.caption("İpucu: Gömülü listeyi yenilemek için sayfayı yeniden yükleyebilirsiniz.")
+                    if atlanan:
+                        st.warning(f"{atlanan} dosya aynı isimde mevcut olduğu için atlandı.")
 
 ### ===========================
 ### --- SATIŞ PERFORMANSI MENÜSÜ ---
