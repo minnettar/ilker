@@ -715,7 +715,7 @@ if menu == "Cari Ekleme":
 
         # --- Kaydet ---
         df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
-        update_sheets()
+        update_google_sheets()
 
         # --- Muhasebeye e-posta (sende tanımlı yardımcılar) ---
         try:
@@ -764,7 +764,7 @@ for col in gerekli_kolonlar:
 mask_id_bos = df_musteri["ID"].isna() | (df_musteri["ID"].astype(str).str.strip() == "")
 if mask_id_bos.any():
     df_musteri.loc[mask_id_bos, "ID"] = [str(uuid.uuid4()) for _ in range(mask_id_bos.sum())]
-    update_sheets()
+    update_google_sheets()
 
 if menu == "Müşteri Listesi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Müşteri Listesi</h2>", unsafe_allow_html=True)
@@ -920,13 +920,13 @@ if menu == "Müşteri Listesi":
                 df_musteri.at[orj_idx, "Ödeme Şekli"] = odeme_sekli
                 df_musteri.at[orj_idx, "Para Birimi"] = para_birimi
                 df_musteri.at[orj_idx, "DT Seçimi"] = dt_secimi
-                update_sheets()
+                update_google_sheets()
                 st.success("Müşteri bilgisi güncellendi!")
                 st.rerun()
 
             if sil:
                 df_musteri = df_musteri.drop(orj_idx).reset_index(drop=True)
-                update_sheets()
+                update_google_sheets()
                 st.success("Müşteri kaydı silindi!")
                 st.rerun()
 
@@ -947,7 +947,7 @@ for c in gerekli:
 mask_bos_id = df_kayit["ID"].isna() | (df_kayit["ID"].astype(str).str.strip() == "")
 if mask_bos_id.any():
     df_kayit.loc[mask_bos_id, "ID"] = [str(uuid.uuid4()) for _ in range(mask_bos_id.sum())]
-    update_sheets()
+    update_google_sheets()
 
 if menu == "Görüşme / Arama / Ziyaret Kayıtları":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Görüşme / Arama / Ziyaret Kayıtları</h2>", unsafe_allow_html=True)
@@ -981,7 +981,7 @@ if menu == "Görüşme / Arama / Ziyaret Kayıtları":
                         "Açıklama": aciklama
                     }
                     df_kayit = pd.concat([df_kayit, pd.DataFrame([new_row])], ignore_index=True)
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Kayıt eklendi!")
                     st.rerun()
 
@@ -1055,13 +1055,13 @@ if menu == "Görüşme / Arama / Ziyaret Kayıtları":
                     df_kayit.at[orj_idx, "Tarih"] = tarih_g
                     df_kayit.at[orj_idx, "Tip"] = tip_g
                     df_kayit.at[orj_idx, "Açıklama"] = aciklama_g
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Kayıt güncellendi!")
                     st.rerun()
 
                 if sil:
                     df_kayit = df_kayit.drop(orj_idx).reset_index(drop=True)
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Kayıt silindi!")
                     st.rerun()
 
@@ -1110,7 +1110,7 @@ elif menu == "Fiyat Teklifleri":
     mask_bos_id = df_teklif["ID"].astype(str).str.strip().isin(["", "nan"])
     if mask_bos_id.any():
         df_teklif.loc[mask_bos_id, "ID"] = [str(uuid.uuid4()) for _ in range(mask_bos_id.sum())]
-        update_sheets()
+        update_google_sheets()
 
     # --- Akıllı sayı dönüştürücü ---
     def smart_to_num(x):
@@ -1229,7 +1229,7 @@ elif menu == "Fiyat Teklifleri":
                         "PDF": pdf_link
                     }
                     df_teklif = pd.concat([df_teklif, pd.DataFrame([new_row])], ignore_index=True)
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Teklif eklendi!")
                     st.session_state['teklif_view'] = None
                     st.rerun()
@@ -1355,13 +1355,13 @@ elif menu == "Fiyat Teklifleri":
                     df_teklif.at[orj_idx, "Açıklama"] = aciklama_g
                     df_teklif.at[orj_idx, "Durum"] = durum_g
                     df_teklif.at[orj_idx, "PDF"] = pdf_link_final
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Teklif güncellendi!")
                     st.rerun()
 
                 if sil:
                     df_teklif = df_teklif.drop(orj_idx).reset_index(drop=True)
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Teklif silindi!")
                     st.rerun()
 
@@ -1694,7 +1694,7 @@ elif menu == "Güncel Sipariş Durumu":
 
     if st.button("Termin Tarihini Kaydet"):
         df_proforma.loc[mask_termin, "Termin Tarihi"] = yeni_termin
-        update_sheets()
+        update_google_sheets()
         st.success("Termin tarihi kaydedildi!")
         st.rerun()
 
@@ -1726,7 +1726,7 @@ elif menu == "Güncel Sipariş Durumu":
             }])], ignore_index=True)
         # Proforma'yı işaretle
         df_proforma.loc[df_proforma["ID"] == sec_id_sevk, "Sevk Durumu"] = "Sevkedildi"
-        update_sheets()
+        update_google_sheets()
         st.success("Sipariş sevkedildi ve ETA takibine gönderildi!")
         st.rerun()
 
@@ -1741,7 +1741,7 @@ elif menu == "Güncel Sipariş Durumu":
     if st.button("Beklemeye Al / Geri Çağır"):
         m = (df_proforma["ID"] == sec_id_geri)
         df_proforma.loc[m, ["Durum","Sevk Durumu","Termin Tarihi"]] = ["Beklemede","",""]
-        update_sheets()
+        update_google_sheets()
         st.success("Sipariş tekrar bekleyen proformalar listesine alındı!")
         st.rerun()
 
@@ -1902,7 +1902,7 @@ elif menu == "Fatura & İhracat Evrakları":
                     "Ödendi": False,
                 }
                 df_evrak = pd.concat([df_evrak, pd.DataFrame([new_row])], ignore_index=True)
-                update_sheets()
+                update_google_sheets()
                 st.success("Evrak eklendi!")
                 st.rerun()
 
@@ -1930,7 +1930,7 @@ elif menu == "Fatura & İhracat Evrakları":
     bos_id_mask = df_evrak["ID"].astype(str).str.strip().isin(["","nan"])
     if bos_id_mask.any():
         df_evrak.loc[bos_id_mask, "ID"] = [str(uuid.uuid4()) for _ in range(bos_id_mask.sum())]
-        update_sheets()
+        update_google_sheets()
 
     # ---- Müşteri / Proforma seçimleri ----
     musteri_secenek = sorted(df_proforma["Müşteri Adı"].dropna().astype(str).unique().tolist())
@@ -2074,7 +2074,7 @@ elif menu == "Fatura & İhracat Evrakları":
             df_evrak = pd.concat([df_evrak, pd.DataFrame([new_row])], ignore_index=True)
             islem = "eklendi"
 
-        update_sheets()
+        update_google_sheets()
         st.success(f"Evrak {islem}!")
         st.rerun()
 ### ===========================
@@ -2202,7 +2202,7 @@ elif menu == "Vade Takibi":
                 ana_index = int(sec)
                 df_evrak.at[ana_index, "Ödendi"] = bool(odendi_mi)
                 # İsteğe bağlı: Vade Tarihi ya da diğer alanları da eş zamanlı güncellemek istersen buraya ekleyebilirsin.
-                update_sheets()
+                update_google_sheets()
                 st.success("Ödeme durumu güncellendi!")
                 st.rerun()
 
@@ -2213,9 +2213,9 @@ elif menu == "Vade Takibi":
 elif menu == "ETA Takibi":
     import re, tempfile
 
-    # ---- Yedek: update_sheets() yoksa update_google_sheets() kullan ----
-    if "update_sheets" not in globals():
-        update_sheets = globals().get("update_google_sheets", lambda: None)
+    # ---- Yedek: update_google_sheets() yoksa update_google_sheets() kullan ----
+    if "update_google_sheets" not in globals():
+        update_google_sheets = globals().get("update_google_sheets", lambda: None)
 
     # ---- Sabitler ----
     # Ana İhracat Evrak klasörü (My Drive veya Paylaşılan Sürücü olabilir)
@@ -2447,7 +2447,7 @@ elif menu == "ETA Takibi":
                     "ETA Tarihi": eta_tarih,
                     "Açıklama": aciklama
                 }])], ignore_index=True)
-            update_sheets()
+            update_google_sheets()
             st.success("ETA kaydedildi/güncellendi!")
             st.rerun()
 
@@ -2459,7 +2459,7 @@ elif menu == "ETA Takibi":
             if len(pidx) > 0:
                 df_proforma.at[pidx[0], "Sevk Durumu"] = "Ulaşıldı"
                 df_proforma.at[pidx[0], "Ulaşma Tarihi"] = datetime.date.today()
-            update_sheets()
+            update_google_sheets()
             st.success("Sipariş 'Ulaşıldı' olarak işaretlendi ve ETA takibinden çıkarıldı!")
             st.rerun()
 
@@ -2470,7 +2470,7 @@ elif menu == "ETA Takibi":
                                (df_proforma["Proforma No"] == sec_proforma)].index
             if len(pidx) > 0:
                 df_proforma.at[pidx[0], "Sevk Durumu"] = ""
-            update_sheets()
+            update_google_sheets()
             st.success("Sevkiyat geri alındı! Sipariş tekrar Güncel Sipariş Durumu'na döndü.")
             st.rerun()
 
@@ -2492,7 +2492,7 @@ elif menu == "ETA Takibi":
                                format_func=lambda i: f"{df_eta.at[i, 'Müşteri Adı']} - {df_eta.at[i, 'Proforma No']}")
         if st.button("KAYDI SİL"):
             df_eta = df_eta.drop(sil_sec).reset_index(drop=True)
-            update_sheets()
+            update_google_sheets()
             st.success("Seçilen ETA kaydı silindi!")
             st.rerun()
     else:
@@ -2520,7 +2520,7 @@ elif menu == "ETA Takibi":
                                (df_proforma["Proforma No"] == row["Proforma No"])].index
             if len(pidx) > 0:
                 df_proforma.at[pidx[0], "Ulaşma Tarihi"] = new_ulasma_tarih
-                update_sheets()
+                update_google_sheets()
                 st.success("Ulaşma Tarihi güncellendi!")
                 st.rerun()
 
@@ -2559,7 +2559,7 @@ elif menu == "ETA Takibi":
                 }
                 df_eta = pd.concat([df_eta, pd.DataFrame([yeni_satir])], ignore_index=True)
 
-            update_sheets()
+            update_google_sheets()
             st.success("Sipariş, Ulaşanlar'dan geri alındı ve ETA listesine taşındı (Sevkedildi).")
             st.rerun()
 
@@ -2694,7 +2694,7 @@ if menu == "Fuar Müşteri Kayıtları":
                     if fuar_in_form in st.session_state.fuarlar_extra:
                         st.session_state.fuarlar_extra.discard(fuar_in_form)
                     st.session_state.current_fuar = fuar_in_form
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Fuar müşterisi eklendi!")
                     st.rerun()
 
@@ -2771,14 +2771,14 @@ if menu == "Fuar Müşteri Kayıtları":
                     }
                     for k, v in updates.items():
                         df_fuar_musteri.at[secili_index, k] = v
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Kayıt güncellendi!")
                     st.rerun()
 
                 # Sil
                 if sil:
                     df_fuar_musteri = df_fuar_musteri.drop(secili_index).reset_index(drop=True)
-                    update_sheets()
+                    update_google_sheets()
                     st.success("Kayıt silindi!")
                     st.rerun()
 
