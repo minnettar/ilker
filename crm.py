@@ -114,6 +114,9 @@ drive_service = build("drive", "v3", credentials=creds)
 # ======================
 import time
 import random
+import uuid
+import pandas as pd
+import datetime
 from googleapiclient.errors import HttpError
 
 # Hangi HTTP kodlarında tekrar deneyeceğiz
@@ -131,6 +134,7 @@ def _sheets_retry(callable_fn, *, max_tries=6, base=0.6, jitter=0.4, what="sheet
             code = getattr(getattr(he, "resp", None), "status", None)
             if code in RETRY_STATUS and attempt < max_tries - 1:
                 wait = base * (2 ** attempt) + random.uniform(0, jitter)
+                print(f"[retry] {what}: HttpError {code}, {attempt+1}/{max_tries} -> {wait:.2f}s")
                 time.sleep(wait)
                 attempt += 1
                 continue
@@ -139,33 +143,31 @@ def _sheets_retry(callable_fn, *, max_tries=6, base=0.6, jitter=0.4, what="sheet
         except Exception as e:
             # Timeout / bağlantı aksaklıkları için de dene
             msg = str(e).lower()
-            transient = any(k in msg for k in ["timed out", "timeout", "temporarily", "reset"])
+            transient = any(k in msg for k in ["timed out", "timeout", "temporarily", "reset", "connection aborted"])
             if transient and attempt < max_tries - 1:
                 wait = base * (2 ** attempt) + random.uniform(0, jitter)
+                print(f"[retry] {what}: transient err '{e}', {attempt+1}/{max_tries} -> {wait:.2f}s")
                 time.sleep(wait)
                 attempt += 1
                 continue
             else:
                 raise
 
-import uuid
-
-def ensure_id(df, id_col="ID"):
+def ensure_id(df: pd.DataFrame, id_col: str = "ID") -> pd.DataFrame:
     """
     DataFrame'de belirtilen id_col sütunu yoksa ekler.
     Boş olan ID hücrelerini uuid4 ile doldurur.
     """
+    if df is None:
+        return pd.DataFrame({id_col: []})
     if id_col not in df.columns:
         df[id_col] = ""
-
-    bos_id = df[id_col].astype(str).str.strip().isin(["", "nan", "None"])
+    bos_id = df[id_col].astype(str).str.strip().isin(["", "nan", "none", "None"])
     if bos_id.any():
         df.loc[bos_id, id_col] = [str(uuid.uuid4()) for _ in range(bos_id.sum())]
-
     return df
 
 def _safe_str(x):
-    import pandas as pd, datetime
     if pd.isna(x):
         return ""
     if isinstance(x, (pd.Timestamp, datetime.datetime, datetime.date)):
@@ -177,7 +179,6 @@ def _safe_str(x):
 
 def df_to_values(df: pd.DataFrame):
     """DataFrame'i Sheets'e uygun 2D listeye çevirir."""
-    import pandas as pd
     if not isinstance(df, pd.DataFrame):
         return [[]]
     if df.empty:
@@ -204,10 +205,9 @@ def write_df(sheet_name: str, df: pd.DataFrame, *, allow_clear_on_empty: bool = 
     Kota dostu yazma:
     - 'clear' YOK. Yalnızca A1'den itibaren 'update' yapar (tek istek).
     - df boşsa ve allow_clear_on_empty=False ise hiç yazmaz (sayfayı korur).
-    - Eğer eski satırlar fazlalık kalırsa, periyodik bakımda 'clear' yapabilirsiniz (manuel).
+    - Eğer eski satırlar fazlalık kalırsa, periyodik bakımda manuel 'clear' yapabilirsiniz.
     """
     try:
-        import pandas as pd
         if not isinstance(df, pd.DataFrame):
             print(f"[write_df] {sheet_name}: df DataFrame değil, atlandı.")
             return
@@ -237,17 +237,26 @@ def update_google_sheets():
     """
     Tüm sayfaları kota dostu şekilde günceller (clear yok, tek tek update).
     """
-    write_df("Sayfa1",      df_musteri)
-    write_df("Kayıtlar",    df_kayit)
-    write_df("Teklifler",   df_teklif)
-    write_df("Proformalar", df_proforma)
-    write_df("Evraklar",    df_evrak)
-    write_df("ETA",         df_eta)           # boşsa yazmaz
-    write_df("FuarMusteri", df_fuar_musteri)  # boşsa yazmaz
+    # Not: Burada sadece DF'leri yazıyoruz; boş olanlar skip (ETA, FuarMusteri gibi)
+    try: write_df("Sayfa1",      df_musteri)
+    except Exception as e: print("[update] Sayfa1:", e)
+    try: write_df("Kayıtlar",    df_kayit)
+    except Exception as e: print("[update] Kayıtlar:", e)
+    try: write_df("Teklifler",   df_teklif)
+    except Exception as e: print("[update] Teklifler:", e)
+    try: write_df("Proformalar", df_proforma)
+    except Exception as e: print("[update] Proformalar:", e)
+    try: write_df("Evraklar",    df_evrak)
+    except Exception as e: print("[update] Evraklar:", e)
+    try: write_df("ETA",         df_eta)
+    except Exception as e: print("[update] ETA:", e)
+    try: write_df("FuarMusteri", df_fuar_musteri)
+    except Exception as e: print("[update] FuarMusteri:", e)
 
-def load_sheet_as_df(sheet_name, columns):
+def load_sheet_as_df(sheet_name: str, columns: list[str]) -> pd.DataFrame:
     """
     Okumayı da retry ile güvenceye alır.
+    Dönen DataFrame, belirtilen 'columns' sırasına zorlanır ve eksikler eklenir.
     """
     try:
         def _do_get():
@@ -273,12 +282,12 @@ def load_sheet_as_df(sheet_name, columns):
 
         df = pd.DataFrame(fixed_rows, columns=header)
 
-        # Eksik kolonları ekle
+        # Eksik kolonları ekle ve sıralamayı sabitle
         for col in columns:
             if col not in df.columns:
                 df[col] = ""
-
         return df[columns]
+
     except Exception as e:
         print(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
         return pd.DataFrame(columns=columns)
