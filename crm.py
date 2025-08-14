@@ -2795,22 +2795,24 @@ if menu == "Fuar Müşteri Kayıtları":
 
 elif menu == "Medya Çekmecesi":
     st.markdown("<h2 style='color:#8e54e9; font-weight:bold;'>Medya Çekmecesi</h2>", unsafe_allow_html=True)
-    st.info("Google Drive’daki medya, ürün görselleri ve kalite evraklarına aşağıdaki sekmelerden ulaşabilirsiniz.")
+    st.info("Google Drive’daki medya, ürün görselleri, kalite evrakları ve arşiv klasörünü aşağıdaki sekmelerden görüntüleyebilirsiniz.")
 
-    # --- Klasör ID'leri (kolayca değiştirilebilir) ---
+    # --- Klasör ID'leri ---
     DRIVE_FOLDER_IDS = {
         "Genel Medya Klasörü": "1gFAaK-6v1e3346e-W0TsizOqSq43vHLY",
         "Ürün Görselleri":      "18NNlmadm5NNFkI1Amzt_YMwB53j6AmbD",
         "Kalite Evrakları":     "1pbArzYfA4Tp50zvdyTzSPF2ThrMWrGJc",
+        "📦 Arşiv":              "1uXq2OZxQaAT_dRoRCUa3w3BioudJ5m5A",  # <-- EKLENDİ
     }
 
     def embed_url(folder_id: str) -> str:
+        # Grid görünüm istiyorsan '#grid' de kullanabilirsin
         return f"https://drive.google.com/embeddedfolderview?id={folder_id}#list"
 
     def open_url(folder_id: str) -> str:
         return f"https://drive.google.com/drive/folders/{folder_id}?usp=sharing"
 
-    # --- Gömülü görünüm yüksekliği ayarı (ekranına göre) ---
+    # --- Gömülü görünüm yüksekliği ---
     h = st.slider("Gömülü görünüm yüksekliği (px)", min_value=450, max_value=900, value=600, step=50)
 
     tabs = st.tabs(list(DRIVE_FOLDER_IDS.keys()))
@@ -2830,10 +2832,7 @@ elif menu == "Medya Çekmecesi":
             with col_a:
                 st.link_button("🔗 Klasörü yeni sekmede aç", open_url(fid))
             with col_b:
-                st.info("Dosya/klasörlere çift tıklayarak yeni sekmede açabilir veya indirebilirsiniz.")
-
-    st.warning("Not: Klasörlerin paylaşımı 'Bağlantıya sahip olan herkes görüntüleyebilir' olmalı; aksi halde gömülü görünüm boş kalır.")
-
+                st.info("Klasörlerin paylaşımı 'Bağlantıya sahip olan herkes görüntüleyebilir' olmalıdır; aksi halde içerik görünmez.")
 
 ### ===========================
 ### --- SATIŞ PERFORMANSI MENÜSÜ ---
