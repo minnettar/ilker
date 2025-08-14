@@ -112,20 +112,14 @@ drive_service = build("drive", "v3", credentials=creds)
 # ======================
 # SHEETS <-> DATAFRAME YAZMA/OKUMA (KOTA DOSTU)
 # ======================
-import time
-import random
-import uuid
-import pandas as pd
-import datetime
+import time, random, uuid, datetime, pandas as pd
 from googleapiclient.errors import HttpError
 
-# Hangi HTTP kodlarında tekrar deneyeceğiz
+# --- Retry edilecek HTTP kodları ---
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
 def _sheets_retry(callable_fn, *, max_tries=6, base=0.6, jitter=0.4, what="sheets"):
-    """
-    Google API çağrılarını 429/5xx/timeout durumlarında exponential backoff ile tekrar dener.
-    """
+    """Google API çağrılarını 429/5xx/timeout durumlarında exponential backoff ile tekrar dener."""
     attempt = 0
     while True:
         try:
@@ -135,52 +129,42 @@ def _sheets_retry(callable_fn, *, max_tries=6, base=0.6, jitter=0.4, what="sheet
             if code in RETRY_STATUS and attempt < max_tries - 1:
                 wait = base * (2 ** attempt) + random.uniform(0, jitter)
                 print(f"[retry] {what}: HttpError {code}, {attempt+1}/{max_tries} -> {wait:.2f}s")
-                time.sleep(wait)
-                attempt += 1
-                continue
-            else:
-                raise
+                time.sleep(wait); attempt += 1; continue
+            raise
         except Exception as e:
-            # Timeout / bağlantı aksaklıkları için de dene
             msg = str(e).lower()
-            transient = any(k in msg for k in ["timed out", "timeout", "temporarily", "reset", "connection aborted"])
+            transient = any(k in msg for k in ["timed out","timeout","temporarily","reset","connection aborted"])
             if transient and attempt < max_tries - 1:
                 wait = base * (2 ** attempt) + random.uniform(0, jitter)
                 print(f"[retry] {what}: transient err '{e}', {attempt+1}/{max_tries} -> {wait:.2f}s")
-                time.sleep(wait)
-                attempt += 1
-                continue
-            else:
-                raise
+                time.sleep(wait); attempt += 1; continue
+            raise
 
+# --- ID güvencesi (tek tanım) ---
 def ensure_id(df: pd.DataFrame, id_col: str = "ID") -> pd.DataFrame:
     """
-    DataFrame'de belirtilen id_col sütunu yoksa ekler.
-    Boş olan ID hücrelerini uuid4 ile doldurur.
+    DataFrame'te id_col sütununu garanti eder; boş olan hücreleri uuid4 ile doldurur.
+    Var olan ID'lere dokunmaz, Sheets'e burada yazmaz.
     """
     if df is None:
         return pd.DataFrame({id_col: []})
     if id_col not in df.columns:
         df[id_col] = ""
-    bos_id = df[id_col].astype(str).str.strip().isin(["", "nan", "none", "None"])
-    if bos_id.any():
-        df.loc[bos_id, id_col] = [str(uuid.uuid4()) for _ in range(bos_id.sum())]
+    mask = df[id_col].astype(str).str.strip().isin(["", "nan", "none", "None"])
+    if mask.any():
+        df.loc[mask, id_col] = [str(uuid.uuid4()) for _ in range(mask.sum())]
     return df
 
 def _safe_str(x):
-    if pd.isna(x):
-        return ""
+    if pd.isna(x): return ""
     if isinstance(x, (pd.Timestamp, datetime.datetime, datetime.date)):
-        try:
-            return pd.to_datetime(x).strftime("%Y-%m-%d")
-        except Exception:
-            return str(x)
+        try: return pd.to_datetime(x).strftime("%Y-%m-%d")
+        except Exception: return str(x)
     return str(x)
 
 def df_to_values(df: pd.DataFrame):
-    """DataFrame'i Sheets'e uygun 2D listeye çevirir."""
-    if not isinstance(df, pd.DataFrame):
-        return [[]]
+    """DataFrame'i Sheets'e uygun 2D listeye çevirir (ilk satır başlıklar)."""
+    if not isinstance(df, pd.DataFrame): return [[]]
     if df.empty:
         cols = df.columns.tolist()
         return [cols] if cols else [[]]
@@ -189,7 +173,7 @@ def df_to_values(df: pd.DataFrame):
         clean[c] = clean[c].map(_safe_str)
     return [clean.columns.tolist()] + clean.values.tolist()
 
-# ---- THROTTLE: Çok sık yazmayı boğma (örn. 1.2s)
+# ---- THROTTLE: çok sık yazmayı boğma (örn. 1.2s) ----
 if "_last_sheet_write_ts" not in st.session_state:
     st.session_state._last_sheet_write_ts = 0.0
 
@@ -203,18 +187,14 @@ def _throttle(min_interval_sec=1.2):
 def write_df(sheet_name: str, df: pd.DataFrame, *, allow_clear_on_empty: bool = False):
     """
     Kota dostu yazma:
-    - 'clear' YOK. Yalnızca A1'den itibaren 'update' yapar (tek istek).
-    - df boşsa ve allow_clear_on_empty=False ise hiç yazmaz (sayfayı korur).
-    - Eğer eski satırlar fazlalık kalırsa, periyodik bakımda manuel 'clear' yapabilirsiniz.
+    - CLEAR YOK. A1'den itibaren tek 'update' isteği.
+    - df boşsa ve allow_clear_on_empty=False ise yazmaz (sayfayı KORUR).
     """
     try:
         if not isinstance(df, pd.DataFrame):
-            print(f"[write_df] {sheet_name}: df DataFrame değil, atlandı.")
-            return
-
+            print(f"[write_df] {sheet_name}: df DataFrame değil, atlandı."); return
         if df.empty and not allow_clear_on_empty:
-            print(f"[write_df] {sheet_name}: DF boş → yazma atlandı (sayfa korundu).")
-            return
+            print(f"[write_df] {sheet_name}: DF boş → yazma atlandı (sayfa korundu)."); return
 
         values = df_to_values(df)
 
@@ -226,37 +206,32 @@ def write_df(sheet_name: str, df: pd.DataFrame, *, allow_clear_on_empty: bool = 
                 body={"values": values}
             ).execute()
 
-        _throttle()  # hız limitini delmemek için
+        _throttle()
         _sheets_retry(_do_update, what=f"update:{sheet_name}")
         print(f"[write_df] {sheet_name}: {len(df)} satır yazıldı (tek istek, clear yok).")
-
     except Exception as e:
         print(f"[write_df] '{sheet_name}' yazılırken hata: {e}")
 
 def update_google_sheets():
-    """
-    Tüm sayfaları kota dostu şekilde günceller (clear yok, tek tek update).
-    """
-    # Not: Burada sadece DF'leri yazıyoruz; boş olanlar skip (ETA, FuarMusteri gibi)
-    try: write_df("Sayfa1",      df_musteri)
-    except Exception as e: print("[update] Sayfa1:", e)
-    try: write_df("Kayıtlar",    df_kayit)
-    except Exception as e: print("[update] Kayıtlar:", e)
-    try: write_df("Teklifler",   df_teklif)
-    except Exception as e: print("[update] Teklifler:", e)
-    try: write_df("Proformalar", df_proforma)
-    except Exception as e: print("[update] Proformalar:", e)
-    try: write_df("Evraklar",    df_evrak)
-    except Exception as e: print("[update] Evraklar:", e)
-    try: write_df("ETA",         df_eta)
-    except Exception as e: print("[update] ETA:", e)
-    try: write_df("FuarMusteri", df_fuar_musteri)
-    except Exception as e: print("[update] FuarMusteri:", e)
+    """Tüm sayfaları kota dostu şekilde günceller (clear yok, sayfa sayfa update)."""
+    for name, df in [
+        ("Sayfa1", df_musteri),
+        ("Kayıtlar", df_kayit),
+        ("Teklifler", df_teklif),
+        ("Proformalar", df_proforma),
+        ("Evraklar", df_evrak),
+        ("ETA", df_eta),
+        ("FuarMusteri", df_fuar_musteri),
+    ]:
+        try:
+            write_df(name, df)
+        except Exception as e:
+            print(f"[update] {name}: {e}")
 
 def load_sheet_as_df(sheet_name: str, columns: list[str]) -> pd.DataFrame:
     """
-    Okumayı da retry ile güvenceye alır.
-    Dönen DataFrame, belirtilen 'columns' sırasına zorlanır ve eksikler eklenir.
+    Sayfayı okur (retry'li), eksik kolonları ekler ve kolon sırasını 'columns' ile sabitler.
+    Boşsa belirtilen kolonlarla boş DF döner.
     """
     try:
         def _do_get():
@@ -269,25 +244,22 @@ def load_sheet_as_df(sheet_name: str, columns: list[str]) -> pd.DataFrame:
 
         header = [h.strip() for h in values[0]]
         data_rows = values[1:]
-
         H = len(header)
+
         fixed_rows = []
         for r in data_rows:
             r = list(r)
-            if len(r) < H:
-                r = r + [""] * (H - len(r))
-            elif len(r) > H:
-                r = r[:H]
+            if len(r) < H: r = r + [""] * (H - len(r))
+            elif len(r) > H: r = r[:H]
             fixed_rows.append(r)
 
         df = pd.DataFrame(fixed_rows, columns=header)
 
-        # Eksik kolonları ekle ve sıralamayı sabitle
+        # Eksik kolonları ekle, sırayı sabitle
         for col in columns:
             if col not in df.columns:
                 df[col] = ""
         return df[columns]
-
     except Exception as e:
         print(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
         return pd.DataFrame(columns=columns)
@@ -319,13 +291,13 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
     folder_id = folder_id.strip()
     media = MediaFileUpload(local_path, mimetype=_guess_mime_by_ext(filename), resumable=False)
     meta = {"name": filename}
-    if folder_id:
-        meta["parents"] = [folder_id]
+    if folder_id: meta["parents"] = [folder_id]
     try:
         created = drive_service.files().create(
             body=meta, media_body=media, fields="id", supportsAllDrives=True
         ).execute()
         fid = created["id"]
+        # herkese görüntüleme izni (hata verirse yut)
         try:
             drive_service.permissions().create(
                 fileId=fid, body={"role": "reader", "type": "anyone"}, fields="id"
@@ -335,7 +307,6 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
         return f"https://drive.google.com/file/d/{fid}/view?usp=sharing"
     except HttpError as he:
         code = getattr(getattr(he, "resp", None), "status", "unknown")
-        detail = ""
         try:
             detail = he.content.decode() if getattr(he, "content", None) else str(he)
         except Exception:
@@ -345,43 +316,15 @@ def upload_file_to_drive(folder_id: str, local_path: str, filename: str) -> str:
             tips += [
                 "• Klasör ID’si doğru mu ve servis hesabıyla paylaşıldı mı?",
                 "• Klasör Paylaşılan Sürücü mü? supportsAllDrives=True eklendi.",
-                "• SCOPES içinde full 'drive' yetkisi kullanılıyor (ekli).",
+                "• SCOPES içinde tam 'drive' yetkisi var (ekli).",
             ]
         if code == 400:
-            tips += ["• 'parents' alanındaki ID klasör olmalı (dosya ID’si olmasın)."]
+            tips += ["• 'parents' alanındaki ID mutlaka klasör ID olmalı."]
         raise RuntimeError(f"Drive yükleme hatası (HTTP {code}). Ayrıntı: {detail}\n" + "\n".join(tips)) from he
 
 # ======================
-# 3c) SHEETS -> DATAFRAME YÜKLEME
+# 3c) SHEETS -> DATAFRAME YÜKLEME ve ID'leri GARANTİ ETME
 # ======================
-def load_sheet_as_df(sheet_name, columns):
-    try:
-        ws = sheet.values().get(spreadsheetId=SHEET_ID, range=sheet_name).execute()
-        values = ws.get("values", [])
-        if not values:
-            return pd.DataFrame(columns=columns)
-        header = [h.strip() for h in values[0]]
-        data_rows = values[1:]
-        H = len(header)
-        fixed_rows = []
-        for r in data_rows:
-            r = list(r)
-            if len(r) < H:
-                r = r + [""] * (H - len(r))
-            elif len(r) > H:
-                r = r[:H]
-            fixed_rows.append(r)
-        df = pd.DataFrame(fixed_rows, columns=header)
-        for col in columns:
-            if col not in df.columns:
-                df[col] = ""
-        return df[columns]
-    except Exception as e:
-        print(f"'{sheet_name}' sayfası yüklenirken hata: {e}")
-        return pd.DataFrame(columns=columns)
-
-# --- Tüm sayfaları yükle (KOLON İSİMLERİ DÜZELTİLDİ) --
-
 df_musteri = load_sheet_as_df("Sayfa1", [
     "Müşteri Adı","Telefon","E-posta","Adres","Ülke",
     "Satış Temsilcisi","Kategori","Durum","Vade (Gün)","Ödeme Şekli",
@@ -414,7 +357,7 @@ df_fuar_musteri = load_sheet_as_df("FuarMusteri", [
     "Açıklamalar","Görüşme Kalitesi","Tarih"
 ])
 
-# --- YÜKLEME SONRASI: ID'leri garanti et (menüler bunu kullanacak) ---
+# --- ID sütunlarını garanti et (tek sefer) ---
 df_musteri      = ensure_id(df_musteri)
 df_kayit        = ensure_id(df_kayit)
 df_teklif       = ensure_id(df_teklif)
@@ -423,68 +366,22 @@ df_evrak        = ensure_id(df_evrak)
 df_eta          = ensure_id(df_eta)
 df_fuar_musteri = ensure_id(df_fuar_musteri)
 
-# --- Sık kullanılan numeric yardımcı alanlar (ör: vade/özet ekranlar için) ---
+# --- Sayısal yardımcı (örn. vade/özet ekranlar) ---
 def smart_to_num(x):
-    if pd.isna(x):
-        return 0.0
+    if pd.isna(x): return 0.0
     s = str(x).strip()
     for sym in ["USD","$","€","EUR","₺","TL","tl","Tl"]:
         s = s.replace(sym, "")
-    s = s.replace("\u00A0", "").replace(" ", "")
-    try:
-        return float(s)
-    except Exception:
-        pass
+    s = s.replace("\u00A0","").replace(" ","")
+    try: return float(s)              # US format
+    except Exception: pass
     if "," in s:
-        try:
-            return float(s.replace(".", "").replace(",", "."))
-        except Exception:
-            pass
+        try: return float(s.replace(".","").replace(",", "."))  # EU format
+        except Exception: pass
     return 0.0
 
 if "Tutar" in df_evrak.columns and "Tutar_num" not in df_evrak.columns:
     df_evrak["Tutar_num"] = df_evrak["Tutar"].apply(smart_to_num).fillna(0.0)
-
-# ============ ID GÜVENCE BLOĞU (ensure_id + tüm df'lere uygula) ============
-
-import uuid
-import pandas as pd
-
-def ensure_id(df: pd.DataFrame, id_col: str = "ID") -> pd.DataFrame:
-    """
-    DataFrame'te id_col sütununu garanti eder; boş olan hücreleri uuid4 ile doldurur.
-    - df None ise boş bir DataFrame döner.
-    - Var olan 'ID' değerlerine dokunmaz.
-    - KOTA DOSTU: Sheets'e burada yazmaz; sadece df üzerinde çalışır.
-    """
-    if df is None:
-        return pd.DataFrame({id_col: []})
-
-    if id_col not in df.columns:
-        # Mevcut satır sayısına göre sütun oluştur
-        df[id_col] = ""
-
-    # Boş/NaN/None/whitespace ID'ler için uuid üret
-    mask = df[id_col].astype(str).str.strip().isin(["", "nan", "None"])
-    if mask.any():
-        df.loc[mask, id_col] = [str(uuid.uuid4()) for _ in range(mask.sum())]
-
-    return df
-
-# --- Tüm tablolar için ID'yi garanti et (load_sheet_as_df çağrılarından SONRA) ---
-df_musteri       = ensure_id(df_musteri)
-df_kayit         = ensure_id(df_kayit)
-df_teklif        = ensure_id(df_teklif)
-df_proforma      = ensure_id(df_proforma)
-df_evrak         = ensure_id(df_evrak)
-df_eta           = ensure_id(df_eta)
-df_fuar_musteri  = ensure_id(df_fuar_musteri)
-
-# (İsteğe bağlı) Burada istersen tek seferde kalıcıya yazabilirsin:
-# try:
-#     update_google_sheets()
-# except Exception as e:
-#     print(f"update_google_sheets() sırasında bilgi: {e}")
 
 # ============================================================================ 
 
