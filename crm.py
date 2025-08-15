@@ -374,8 +374,6 @@ def update_excel():
     downloaded.SetContentFile("temp.xlsx")
     downloaded.Upload()
 
-# ========= ŞIK SIDEBAR MENÜ (RADIO TABANLI) =========
-
 # ========= ŞIK SIDEBAR MENÜ (RADIO + ANINDA STATE) =========
 
 # 1) Menü tanımı (ikonlar)
@@ -395,11 +393,12 @@ menuler = [
     ("Satış Performansı", "📈"),
 ]
 
-# 2) Kullanıcıya göre izinli menüler
-if st.session_state.user == "Boss":
+# 2) Kullanıcıya göre izinli menüler (user yoksa güvenli varsayılan)
+_user = st.session_state.get("user", None)
+if _user == "Boss":
     allowed_menus = [("Özet Ekran", "📊")]
 else:
-    allowed_menus = menuler
+    allowed_menus = menuler[:]
 
 # 3) Etiketler ve haritalar
 labels = [f"{ikon} {isim}" for (isim, ikon) in allowed_menus]
@@ -411,7 +410,8 @@ if "menu_state" not in st.session_state:
     st.session_state.menu_state = allowed_menus[0][0]
 
 # 5) CSS (radio’yu kart gibi; input’u gizlemiyoruz)
-st.sidebar.markdown("""
+st.sidebar.markdown(
+    """
 <style>
 section[data-testid="stSidebar"] { padding-top: 0.5rem; }
 div[data-testid="stSidebar"] .stRadio > div { gap: 10px !important; }
@@ -428,7 +428,7 @@ div[data-testid="stSidebar"] .stRadio label span { font-weight: 700; color: #fff
 div[data-testid="stSidebar"] .stRadio label:hover { filter: brightness(1.08); transform: translateY(-1px); }
 div[data-testid="stSidebar"] .stRadio [aria-checked="true"] { outline: 2px solid rgba(255,255,255,0.25); }
 
-/* Kart arka planları (sıra) */
+/* Kart arka planları (sıra) — allowed_menus sırana göre boyanır */
 div[data-testid="stSidebar"] .stRadio label:nth-child(1)  { background: linear-gradient(90deg,#1D976C,#93F9B9); }  /* Özet */
 div[data-testid="stSidebar"] .stRadio label:nth-child(2)  { background: linear-gradient(90deg,#43cea2,#185a9d); }  /* Cari */
 div[data-testid="stSidebar"] .stRadio label:nth-child(3)  { background: linear-gradient(90deg,#ffb347,#ffcc33); }  /* Müşteri */
@@ -442,13 +442,14 @@ div[data-testid="stSidebar"] .stRadio label:nth-child(10) { background: linear-g
 div[data-testid="stSidebar"] .stRadio label:nth-child(11) { background: linear-gradient(90deg,#8e54e9,#bd4de6); }  /* Fuar */
 div[data-testid="stSidebar"] .stRadio label:nth-child(12) { background: linear-gradient(90deg,#4b79a1,#283e51); }  /* Medya */
 div[data-testid="stSidebar"] .stRadio label:nth-child(13) { background: linear-gradient(90deg,#2b5876,#4e4376); }  /* Satış Perf. */
-div[data-testid="stSidebar"] .stRadio label:nth-child(14) { background: linear-gradient(90deg,#667eea,#764ba2); }  /* Veritabanı */
 </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 # 6) Callback: seçilince anında state yaz
 def _on_menu_change():
-    sel_label = st.session_state.menu_radio_label
+    sel_label = st.session_state.get("menu_radio_label")
     st.session_state.menu_state = name_by_label.get(sel_label, allowed_menus[0][0])
 
 # 7) Radio’yu mevcut state’e göre başlat
@@ -461,7 +462,7 @@ st.sidebar.radio(
     index=current_index,
     label_visibility="collapsed",
     key="menu_radio_label",
-    on_change=_on_menu_change
+    on_change=_on_menu_change,
 )
 
 # 8) Kullanım: seçili menü adı
@@ -2412,3 +2413,227 @@ with st.expander("🔄 Senkronizasyon", expanded=False):
     if st.button("Şimdi Senkronize Et"):
         msg = sync_local_and_sheet(auto=False, path="temp.xlsx")
         st.success(msg)
+
+
+# ===========================
+#  Google Sheets ↔ temp.xlsx
+#  (bidirectional, quota-safe)
+# ===========================
+import os, time, hashlib
+from typing import Optional, Dict, List
+import pandas as pd
+import streamlit as st
+import gspread
+from gspread_dataframe import set_with_dataframe
+from googleapiclient.discovery import build
+from google.oauth2.service_account import Credentials as SACredentials
+
+LOCAL_FILE = "temp.xlsx"
+API_MIN_DELAY = 2.0
+EXPECTED_SHEETS: List[str] = ["Sayfa1","Kayıtlar","Teklifler","Proformalar","Evraklar","ETA","FuarMusteri"]
+_SCOPES = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
+
+def _get_sa_info_dict() -> dict:
+    try:
+        return dict(st.secrets["gcp_service_account"])
+    except Exception:
+        return {}
+
+@st.cache_resource(show_spinner=False)
+def get_gspread_client_sync():
+    sa = _get_sa_info_dict()
+    creds = SACredentials.from_service_account_info(sa, scopes=_SCOPES)
+    return gspread.authorize(creds)
+
+@st.cache_resource(show_spinner=False)
+def get_drive_service_sync():
+    sa = _get_sa_info_dict()
+    creds = SACredentials.from_service_account_info(sa, scopes=_SCOPES)
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
+def _backoff(fn, *args, **kwargs):
+    delay = 1.0
+    for _ in range(6):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            if "429" in str(e):
+                time.sleep(delay)
+                delay *= 2
+                continue
+            raise
+    return fn(*args, **kwargs)
+
+def _hash_df(df: pd.DataFrame) -> str:
+    try:
+        return hashlib.sha256(df.to_csv(index=False).encode("utf-8","ignore")).hexdigest()
+    except Exception:
+        return ""
+
+def _ensure_meta_sheet(sh):
+    try:
+        return sh.worksheet("Meta")
+    except Exception:
+        ws = sh.add_worksheet(title="Meta", rows=200, cols=3)
+        ws.update("A1", [["Sheet","Hash"]])
+        return ws
+
+def _get_last_hash(meta_ws, title: str) -> Optional[str]:
+    try:
+        for rec in meta_ws.get_all_records():
+            if (rec.get("Sheet") or "").strip() == title:
+                return (rec.get("Hash") or "").strip()
+    except Exception:
+        pass
+    return None
+
+def _upsert_hash(meta_ws, title: str, h: str):
+    try:
+        vals = meta_ws.get("A1:B200") or []
+        if not vals:
+            meta_ws.update("A1", [["Sheet","Hash"]])
+            vals = [["Sheet","Hash"]]
+        for i, row in enumerate(vals[1:], start=2):
+            if len(row)>=1 and (row[0] or "").strip()==title:
+                meta_ws.update_cell(i,2,h)
+                return
+        meta_ws.append_row([title,h])
+    except Exception:
+        pass
+
+def get_sheet_modified_time_sync(sheet_id: str) -> float:
+    try:
+        srv = get_drive_service_sync()
+        resp = _backoff(srv.files().get, fileId=sheet_id, fields="modifiedTime")
+        data = resp.execute()
+        iso = data.get("modifiedTime","")
+        if not iso:
+            return 0.0
+        try:
+            import pandas as _pd
+            return float(_pd.to_datetime(iso).timestamp())
+        except Exception:
+            from datetime import datetime
+            return datetime.fromisoformat(iso.replace("Z","+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+def get_local_mtime_sync(path: str = LOCAL_FILE) -> float:
+    try:
+        return os.path.getmtime(path)
+    except Exception:
+        return 0.0
+
+def read_all_from_sheet_sync(sheet_id: str) -> Dict[str, pd.DataFrame]:
+    gc = get_gspread_client_sync()
+    sh = gc.open_by_key(sheet_id)
+    dfs: Dict[str,pd.DataFrame] = {}
+    titles = [w.title for w in sh.worksheets()]
+    for name in EXPECTED_SHEETS:
+        if name in titles:
+            ws = sh.worksheet(name)
+            dfs[name] = pd.DataFrame(ws.get_all_records())
+            time.sleep(API_MIN_DELAY)
+        else:
+            dfs[name] = pd.DataFrame()
+    return dfs
+
+def write_one_ws_quota_safe_sync(ws, df: pd.DataFrame) -> str:
+    sh = ws.spreadsheet
+    meta_ws = _ensure_meta_sheet(sh)
+    new_hash = _hash_df(df if isinstance(df,pd.DataFrame) else pd.DataFrame())
+    last_hash = _get_last_hash(meta_ws, ws.title)
+    if last_hash and last_hash == new_hash:
+        return "skip"
+    _backoff(ws.clear)
+    _backoff(set_with_dataframe, ws, df if isinstance(df,pd.DataFrame) else pd.DataFrame())
+    _upsert_hash(meta_ws, ws.title, new_hash)
+    time.sleep(API_MIN_DELAY)
+    return "write"
+
+def write_all_to_sheet_sync(sheet_id: str, dfs: Dict[str,pd.DataFrame]) -> int:
+    gc = get_gspread_client_sync()
+    sh = gc.open_by_key(sheet_id)
+    titles = {w.title for w in sh.worksheets()}
+    for name in EXPECTED_SHEETS:
+        if name not in titles:
+            _backoff(sh.add_worksheet, title=name, rows=1000, cols=26)
+            time.sleep(API_MIN_DELAY)
+    writes = 0
+    for name in EXPECTED_SHEETS:
+        df = dfs.get(name, pd.DataFrame())
+        ws = sh.worksheet(name)
+        res = write_one_ws_quota_safe_sync(ws, df)
+        if res == "write":
+            writes += 1
+    return writes
+
+def read_all_from_excel_sync(path: str = LOCAL_FILE) -> Dict[str,pd.DataFrame]:
+    dfs: Dict[str,pd.DataFrame] = {}
+    if not os.path.exists(path):
+        for n in EXPECTED_SHEETS:
+            dfs[n] = pd.DataFrame()
+        return dfs
+    try:
+        for n in EXPECTED_SHEETS:
+            try:
+                dfs[n] = pd.read_excel(path, sheet_name=n)
+            except Exception:
+                dfs[n] = pd.DataFrame()
+    except Exception:
+        for n in EXPECTED_SHEETS:
+            dfs[n] = pd.DataFrame()
+    return dfs
+
+def write_all_to_excel_sync(dfs: Dict[str,pd.DataFrame], path: str = LOCAL_FILE, order: Optional[List[str]] = None):
+    order = order or EXPECTED_SHEETS
+    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+        for name in order:
+            df = dfs.get(name, pd.DataFrame())
+            (df if isinstance(df,pd.DataFrame) else pd.DataFrame()).to_excel(writer, index=False, sheet_name=name)
+
+def sync_bidirectional(sheet_id: str, local_path: str = LOCAL_FILE) -> str:
+    sheet_ts = get_sheet_modified_time_sync(sheet_id)
+    local_ts = get_local_mtime_sync(local_path)
+    if sheet_ts == 0.0 and local_ts == 0.0:
+        return "Ne Google Sheets'e bağlanabildim ne de temp.xlsx bulundu."
+
+    if sheet_ts > local_ts:
+        dfs = read_all_from_sheet_sync(sheet_id)
+        write_all_to_excel_sync(dfs, local_path, order=EXPECTED_SHEETS)
+        try:
+            os.utime(local_path, (time.time(), sheet_ts))
+        except Exception:
+            pass
+        return "Google Sheets daha yeniydi → temp.xlsx güncellendi."
+    elif local_ts > sheet_ts:
+        dfs = read_all_from_excel_sync(local_path)
+        writes = write_all_to_sheet_sync(sheet_id, dfs)
+        return f"Lokal temp.xlsx daha yeniydi → Sheets güncellendi (yazılan sayfa: {writes})."
+    else:
+        return "Her iki taraf da güncel görünüyor. Değişiklik yapılmadı."
+
+
+
+# === Senkron UI (opsiyonel) ===
+try:
+    st.subheader("📂 Çift Yönlü Senkron")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("🔄 Hangisi güncelse onu senkronize et"):
+            try:
+                msg = sync_bidirectional(SHEET_ID, "temp.xlsx")
+                st.success(msg)
+            except Exception as e:
+                st.error(f"Senkron hatası: {e}")
+    with c2:
+        if st.button("📥 Sadece Sheets → Excel"):
+            try:
+                dfs = read_all_from_sheet_sync(SHEET_ID)
+                write_all_to_excel_sync(dfs, "temp.xlsx")
+                st.success("Sheets → temp.xlsx tamam.")
+            except Exception as e:
+                st.error(f"Hata: {e}")
+except Exception:
+    pass
+
