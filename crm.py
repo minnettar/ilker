@@ -148,7 +148,7 @@ def confirm_modal(key: str, title: str, text: str) -> bool:
 
 # ---- Global drive nesnesi (yoksa) ----
 try:
-    _ = drive  # mevcutsa dokunma
+    drive = get_drive_client()
 except NameError:
     try:
         # INIT REMOVED: lazy initialization will be used
