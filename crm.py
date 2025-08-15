@@ -22,7 +22,6 @@ SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 # =============================
 import json
 from typing import Optional, Any, Dict, List
-import streamlit as st
 
 # ---- Google Service Account ile Drive & Sheets istemcileri ----
 try:
