@@ -378,16 +378,7 @@ def inject_sidebar_css():
     st.sidebar.markdown(
         """
 <style>
-div[data-testid="stSidebar"] .stRadio > div { gap: 10px !important; }
-div[data-testid="stSidebar"] .stRadio label {
-    border-radius: 12px;
-    padding: 12px 14px;
-    margin-bottom: 6px;
-    border: 1px solid rgba(255,255,255,0.12);
-    display: flex; align-items: center;
-    transition: transform .06s ease, filter .15s ease;
-    box-shadow: 0 1px 4px rgba(0,0,0,.08);
-}
+
 div[data-testid="stSidebar"] .stRadio label span { font-weight: 700; color: #fff; }
 div[data-testid="stSidebar"] .stRadio label:hover { filter: brightness(1.08); transform: translateY(-1px); }
 div[data-testid="stSidebar"] .stRadio [aria-checked="true"] { outline: 2px solid rgba(255,255,255,0.25); }
