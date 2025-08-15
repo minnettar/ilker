@@ -16,6 +16,10 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
+LOGO_FILE_ID = "1DCxtSsAeR7Zfk2IQU0UMGmD0uTdNO1B3"
+LOGO_LOCAL_NAME = "logo1.png"
+EVRAK_KLASOR_ID = '14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J'
+FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
 
 # =============================
 # === CRM ILKER: Revizyon 1 ===
@@ -235,13 +239,6 @@ ulke_listesi = sorted([
 
 temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIRIM", "FERHAT ŞEKEROĞLU"]
 
-LOGO_FILE_ID = "1DCxtSsAeR7Zfk2IQU0UMGmD0uTdNO1B3"
-LOGO_LOCAL_NAME = "logo1.png"
-EXCEL_FILE_ID = '1IF6CN4oHEMk6IEE40ZGixPkfnNHLYXnQ'
-EVRAK_KLASOR_ID = '14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J'
-FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
-
-
 
 # --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
 from pydrive2.auth import GoogleAuth
@@ -283,7 +280,7 @@ with col2:
     </div>
 """, unsafe_allow_html=True)
 
-downloaded = drive.CreateFile({'id': EXCEL_FILE_ID})
+downloaded = drive.CreateFile({'id': SHEETS_ID})
 downloaded.FetchMetadata(fetch_all=True)
 downloaded.GetContentFile("temp.xlsx")
 
