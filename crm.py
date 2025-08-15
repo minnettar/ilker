@@ -257,7 +257,6 @@ _SCOPES = [
 @st.cache_resource(show_spinner=False)
 
 # --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
-import streamlit as st
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from oauth2client.service_account import ServiceAccountCredentials
