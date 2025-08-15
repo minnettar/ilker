@@ -1817,6 +1817,10 @@ elif menu == "Güncel Sipariş Durumu":
 
     st.header("Güncel Sipariş Durumu")
 
+    # ---- df_proforma: kolonları tekilleştir (pyarrow/sheets karışmasın) ----
+    if df_proforma.columns.duplicated().any():
+        df_proforma = df_proforma.loc[:, ~df_proforma.columns.duplicated()]
+
     # ---- Kolon güvenliği + ID backfill ----
     gerekli = [
         "ID","Sevk Durumu","Termin Tarihi","Sipariş Formu","Ülke","Satış Temsilcisi",
@@ -1829,7 +1833,11 @@ elif menu == "Güncel Sipariş Durumu":
     bos_id = df_proforma["ID"].astype(str).str.strip().isin(["","nan","None"])
     if bos_id.any():
         df_proforma.loc[bos_id, "ID"] = [str(uuid.uuid4()) for _ in range(bos_id.sum())]
-        update_google_sheets()
+        # sadece Proformalar'ı yaz
+        try:
+            write_df("Proformalar", df_proforma)
+        except Exception as e:
+            st.warning(f"ID backfill yazımında uyarı: {e}")
 
     # ---- Filtre: Siparişe dönmüş ama sevk edilmemiş/ulaşmamış kayıtlar
     siparisler = df_proforma[
@@ -1846,12 +1854,12 @@ elif menu == "Güncel Sipariş Durumu":
     siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce")
     siparisler = siparisler.sort_values(["Termin Tarihi Order","Tarih"], ascending=[True, True])
 
-    # ---- Görünüm için format (NaT güvenli)
+    # ---- Görünüm için format
     g = siparisler.copy()
     g["Tarih"] = pd.to_datetime(g["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
     g["Termin Tarihi"] = pd.to_datetime(g["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
 
-    # --- PYARROW duplicate column name guard ---
+    # --- Ekranda göstermeden önce tekrar-isim guard (güvenlik) ---
     def _dedupe_columns(df: pd.DataFrame) -> pd.DataFrame:
         seen = {}
         new_cols = []
@@ -1861,7 +1869,7 @@ elif menu == "Güncel Sipariş Durumu":
                 new_cols.append(c)
             else:
                 seen[c] += 1
-                new_cols.append(f"{c}__{seen[c]}")  # Açıklama__1 gibi
+                new_cols.append(f"{c}__{seen[c]}")
         out = df.copy()
         out.columns = new_cols
         return out
@@ -1895,10 +1903,36 @@ elif menu == "Güncel Sipariş Durumu":
     yeni_termin = st.date_input("Termin Tarihi", value=default_termin, key="termin_input")
 
     if st.button("Termin Tarihini Kaydet"):
-        df_proforma.loc[mask_termin, "Termin Tarihi"] = pd.to_datetime(yeni_termin)
-        update_google_sheets()
-        st.success("Termin tarihi kaydedildi!")
-        st.rerun()
+        if not mask_termin.any():
+            st.error("Seçilen ID ana tabloda bulunamadı (ID eşleşmesi yok).")
+        else:
+            # 1) Local df'de güncelle
+            df_proforma.loc[mask_termin, "Termin Tarihi"] = pd.to_datetime(yeni_termin)
+
+            # 2) Hemen sadece Proformalar sayfasına yaz (tek istek)
+            try:
+                write_df("Proformalar", df_proforma)
+            except Exception as e:
+                st.error(f"Sheets yazım hatası: {e}")
+                st.stop()
+
+            # 3) Doğrulama için Sheets'ten tekrar yükle ve ekrana yansıt
+            try:
+                _proforma_cols = [
+                    "Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama",
+                    "Durum","PDF","Sipariş Formu","Vade (gün)","Sevk Durumu",
+                    "Ülke","Satış Temsilcisi","Ödeme Şekli","Termin Tarihi",
+                    "Sevk Tarihi","Ulaşma Tarihi","ID"
+                ]
+                df_proforma = load_sheet_as_df("Proformalar", _proforma_cols)
+                # ID sütunu yoksa güvenceye al
+                if "ID" not in df_proforma.columns:
+                    df_proforma["ID"] = ""
+                st.success("Termin tarihi kaydedildi ve Sheets’ten doğrulandı!")
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Yazıldı; ancak tekrar yüklemede uyarı: {e}")
+                st.rerun()
 
     # ================= Sevk Et (ETA’ya gönder) =================
     st.markdown("#### Siparişi Sevk Et (ETA Takibine Gönder)")
@@ -1909,15 +1943,11 @@ elif menu == "Güncel Sipariş Durumu":
         key="sevk_sec"
     )
     if st.button("Sevkedildi → ETA'ya Ekle"):
-        # Proforma'dan bilgiler
         row = df_proforma.loc[df_proforma["ID"].astype(str) == str(sec_id_sevk)].iloc[0]
-
-        # ETA kolon güvenliği
         for col in ["Müşteri Adı","Proforma No","ETA Tarihi","Açıklama"]:
             if col not in df_eta.columns:
                 df_eta[col] = ""
 
-        # ETA'ya ekle (varsa güncelle)
         filt = (df_eta["Müşteri Adı"] == row["Müşteri Adı"]) & (df_eta["Proforma No"] == row["Proforma No"])
         if filt.any():
             df_eta.loc[filt, "Açıklama"] = row.get("Açıklama","")
@@ -1929,9 +1959,14 @@ elif menu == "Güncel Sipariş Durumu":
                 "Açıklama": row.get("Açıklama","")
             }])], ignore_index=True)
 
-        # Proforma'yı işaretle
         df_proforma.loc[df_proforma["ID"].astype(str) == str(sec_id_sevk), "Sevk Durumu"] = "Sevkedildi"
-        update_google_sheets()
+        try:
+            write_df("Proformalar", df_proforma)
+            write_df("ETA", df_eta)
+        except Exception as e:
+            st.error(f"Sheets yazım hatası: {e}")
+            st.stop()
+
         st.success("Sipariş sevkedildi ve ETA takibine gönderildi!")
         st.rerun()
 
@@ -1946,7 +1981,11 @@ elif menu == "Güncel Sipariş Durumu":
     if st.button("Beklemeye Al / Geri Çağır"):
         m = (df_proforma["ID"].astype(str) == str(sec_id_geri))
         df_proforma.loc[m, ["Durum","Sevk Durumu","Termin Tarihi"]] = ["Beklemede","",""]
-        update_google_sheets()
+        try:
+            write_df("Proformalar", df_proforma)
+        except Exception as e:
+            st.error(f"Sheets yazım hatası: {e}")
+            st.stop()
         st.success("Sipariş tekrar bekleyen proformalar listesine alındı!")
         st.rerun()
 
@@ -1962,7 +2001,7 @@ elif menu == "Güncel Sipariş Durumu":
         if links:
             st.markdown(" - " + " | ".join(links), unsafe_allow_html=True)
 
-    # Toplam bekleyen sevk tutarı (çoklu para birimi güvenli parse)
+    # Toplam bekleyen sevk tutarı
     def smart_to_num(x):
         if pd.isna(x): return 0.0
         s = str(x).strip()
