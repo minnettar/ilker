@@ -371,8 +371,6 @@ def update_excel():
     downloaded.SetContentFile("temp.xlsx")
     downloaded.Upload()
 
-# ========= ŞIK SIDEBAR MENÜ (RADIO TABANLI) =========
-
 # ========= ŞIK SIDEBAR MENÜ (RADIO + ANINDA STATE) =========
 
 # 1) Menü tanımı (ikonlar)
@@ -392,11 +390,12 @@ menuler = [
     ("Satış Performansı", "📈"),
 ]
 
-# 2) Kullanıcıya göre izinli menüler
-if st.session_state.user == "Boss":
+# 2) Kullanıcıya göre izinli menüler (user yoksa güvenli varsayılan)
+_user = st.session_state.get("user", None)
+if _user == "Boss":
     allowed_menus = [("Özet Ekran", "📊")]
 else:
-    allowed_menus = menuler
+    allowed_menus = menuler[:]
 
 # 3) Etiketler ve haritalar
 labels = [f"{ikon} {isim}" for (isim, ikon) in allowed_menus]
@@ -408,9 +407,10 @@ if "menu_state" not in st.session_state:
     st.session_state.menu_state = allowed_menus[0][0]
 
 # 5) CSS (radio’yu kart gibi; input’u gizlemiyoruz)
-st.sidebar.markdown("""
+st.sidebar.markdown(
+    """
 <style>
-div[data-testid="stSidebar"] { padding-top: 0.5rem; }
+section[data-testid="stSidebar"] { padding-top: 0.5rem; }
 div[data-testid="stSidebar"] .stRadio > div { gap: 10px !important; }
 div[data-testid="stSidebar"] .stRadio label {
     border-radius: 12px;
@@ -425,7 +425,7 @@ div[data-testid="stSidebar"] .stRadio label span { font-weight: 700; color: #fff
 div[data-testid="stSidebar"] .stRadio label:hover { filter: brightness(1.08); transform: translateY(-1px); }
 div[data-testid="stSidebar"] .stRadio [aria-checked="true"] { outline: 2px solid rgba(255,255,255,0.25); }
 
-/* Kart arka planları (sıra) */
+/* Kart arka planları (sıra) — allowed_menus sırana göre boyanır */
 div[data-testid="stSidebar"] .stRadio label:nth-child(1)  { background: linear-gradient(90deg,#1D976C,#93F9B9); }  /* Özet */
 div[data-testid="stSidebar"] .stRadio label:nth-child(2)  { background: linear-gradient(90deg,#43cea2,#185a9d); }  /* Cari */
 div[data-testid="stSidebar"] .stRadio label:nth-child(3)  { background: linear-gradient(90deg,#ffb347,#ffcc33); }  /* Müşteri */
@@ -439,13 +439,14 @@ div[data-testid="stSidebar"] .stRadio label:nth-child(10) { background: linear-g
 div[data-testid="stSidebar"] .stRadio label:nth-child(11) { background: linear-gradient(90deg,#8e54e9,#bd4de6); }  /* Fuar */
 div[data-testid="stSidebar"] .stRadio label:nth-child(12) { background: linear-gradient(90deg,#4b79a1,#283e51); }  /* Medya */
 div[data-testid="stSidebar"] .stRadio label:nth-child(13) { background: linear-gradient(90deg,#2b5876,#4e4376); }  /* Satış Perf. */
-div[data-testid="stSidebar"] .stRadio label:nth-child(14) { background: linear-gradient(90deg,#667eea,#764ba2); }  /* Veritabanı */
 </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 # 6) Callback: seçilince anında state yaz
 def _on_menu_change():
-    sel_label = st.session_state.menu_radio_label
+    sel_label = st.session_state.get("menu_radio_label")
     st.session_state.menu_state = name_by_label.get(sel_label, allowed_menus[0][0])
 
 # 7) Radio’yu mevcut state’e göre başlat
@@ -458,7 +459,7 @@ st.sidebar.radio(
     index=current_index,
     label_visibility="collapsed",
     key="menu_radio_label",
-    on_change=_on_menu_change
+    on_change=_on_menu_change,
 )
 
 # 8) Kullanım: seçili menü adı
