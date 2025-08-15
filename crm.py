@@ -15,8 +15,6 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
-
 # =============================
 # === CRM ILKER: Revizyon 1 ===
 # === Güvenli erişim & yardımcılar
@@ -141,14 +139,10 @@ import pandas as pd
 
 @st.cache_resource(show_spinner=False)
 def open_main_sheet():
-    """
-    Ana Google Sheet'i açar.
-    Öncelik: secrets.app.sheet_id -> yoksa kod içindeki SHEET_ID sabiti.
-    """
-    # Önce secrets, yoksa sabit
-    sheet_id = (st.secrets.get("app", {}).get("sheet_id", "") or SHEET_ID).strip()
+    """Ana Google Sheet'i secrets.app.sheet_id üzerinden açar."""
+    sheet_id = st.secrets.get("app", {}).get("sheet_id", "").strip()
     if not sheet_id:
-        st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id girin veya SHEET_ID sabitini doldurun.")
+        st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id değerini girin.")
         st.stop()
     gc = get_gspread_client()
     if gc is None:
@@ -159,6 +153,7 @@ def open_main_sheet():
     except Exception as e:
         st.error(f"Ana Sheet açılamadı: {e}")
         st.stop()
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_ws(ws_name: str) -> pd.DataFrame:
     """Ana Sheet içindeki bir çalışma sayfasını DataFrame olarak döndürür."""
@@ -245,26 +240,11 @@ EVRAK_KLASOR_ID = '14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J'
 FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
 
 
-
-# --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-from oauth2client.service_account import ServiceAccountCredentials
-
-_SCOPES = [
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/spreadsheets",
-]
-
-@st.cache_resource(show_spinner=False)
+@st.cache_resource
 def get_drive():
-    """Google Drive istemcisi (Service Account). LocalWebserverAuth kullanılmaz."""
-    sa_info = dict(st.secrets["gcp_service_account"])  # secrets.toml veya Cloud Secrets
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scopes=_SCOPES)
     gauth = GoogleAuth()
-    gauth.credentials = creds
+    gauth.LocalWebserverAuth()
     return GoogleDrive(gauth)
-
 drive = get_drive()
 
 if not os.path.exists(LOGO_LOCAL_NAME):
@@ -2335,20 +2315,94 @@ def _read_sheet_all() -> Dict[str, pd.DataFrame]:
         dfs[ws] = load_ws(ws)
     return dfs
 
+
+# ===== Quota-friendly helpers (429 mitigation) =====
+import time, hashlib
+from typing import List
+import pandas as _pd
+
+def _df_signature(df: _pd.DataFrame) -> str:
+    """Deterministic signature for a DataFrame to detect changes."""
+    if df is None or df.empty:
+        return "empty"
+    # ensure stable column order and dtypes
+    df2 = df.copy()
+    # convert to strings to avoid float repr differences
+    values_str = df2.astype(str).values.tolist()
+    raw = "|".join(df2.columns.astype(str)) + "||" + "||".join("/".join(row) for row in values_str)
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+def _gs_backoff(call, *args, **kwargs):
+    """Exponential backoff wrapper for gspread calls that may 429."""
+    delays = [1, 2, 4, 8, 16]  # total up to ~31s
+    last_exc = None
+    for d in [0] + delays:
+        if d:
+            time.sleep(d)
+        try:
+            return call(*args, **kwargs)
+        except Exception as e:
+            last_exc = e
+            # break early if not a quota error
+            msg = str(e).lower()
+            if "429" not in msg and "quota" not in msg:
+                break
+            continue
+    raise last_exc
+
+def _meta_get_sig_map(sh):
+    """Read per-worksheet signatures from Meta sheet (column A: title, B: sig)."""
+    ws = _get_meta_ws()
+    try:
+        rows = ws.get("D1:E100")  # use a separate area from timestamps
+        # expect header in D1:E1
+        pairs = {}
+        if rows and len(rows) > 1:
+            for r in rows[1:]:
+                if len(r) >= 2 and r[0]:
+                    pairs[r[0]] = r[1]
+        return pairs
+    except Exception:
+        return {}
+
+def _meta_set_sig(sh, title, sig):
+    ws = _get_meta_ws()
+    # write header if empty
+    rng = ws.get("D1:E1")
+    if not rng or not rng[0]:
+        ws.update("D1:E1", [["ws_title", "ws_sig"]])
+    # find existing row
+    rows = ws.get("D2:E100")
+    found_row = None
+    base = 2
+    for i, r in enumerate(rows, start=base):
+        if r and len(r) >= 1 and r[0] == title:
+            found_row = i
+            break
+    if found_row is None:
+        # append
+        _gs_backoff(ws.append_row, [title, sig], table_range="D2:E2")
+    else:
+        _gs_backoff(ws.update_cell, found_row, 5, sig)  # col E is 5th
+# ===== end quota-friendly helpers =====
 def _write_local_all(dfs: Dict[str, pd.DataFrame], path: str = "temp.xlsx"):
     # Tüm sayfaları aynı dosyaya çoklu sheet olarak yaz
     with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
         for name, df in dfs.items():
             (df if isinstance(df, pd.DataFrame) else pd.DataFrame()).to_excel(writer, index=False, sheet_name=name)
 
+
 def _write_sheet_all(dfs: Dict[str, pd.DataFrame]):
-    # Tüm sayfaları Google Sheets'e yaz (tam sayfa güncelleme)
-    # gspread-dataframe kullanımı:
+    """
+    Quota-dostu tam sayfa yazma:
+    - Değişmeyen sayfaları atlar (Meta!D:E’de imza tutar).
+    - Her sayfayı tek bir ws.update("A1", values) çağrısıyla yazar.
+    - 429 için exponential backoff uygular.
+    """
     try:
-        from gspread_dataframe import set_with_dataframe
+        from gspread_dataframe import set_with_dataframe  # kept for compatibility if needed
     except Exception:
-        st.error("gspread-dataframe kütüphanesi eksik. requirements.txt içine 'gspread-dataframe' ekleyin.")
-        st.stop()
+        pass
 
     sh = open_main_sheet()
 
@@ -2356,14 +2410,44 @@ def _write_sheet_all(dfs: Dict[str, pd.DataFrame]):
     existing_titles = [ws.title for ws in sh.worksheets()]
     for title in _expected_sheets():
         if title not in existing_titles:
-            sh.add_worksheet(title=title, rows=1000, cols=26)
+            _gs_backoff(sh.add_worksheet, title=title, rows=1000, cols=26)
+
+    # read previous signatures to skip unchanged sheets
+    prev_sigs = _meta_get_sig_map(sh)
 
     for name, df in dfs.items():
+        df = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+        sig = _df_signature(df)
+        if prev_sigs.get(name) == sig:
+            # unchanged, skip write
+            continue
+
         ws = sh.worksheet(name)
-        # Sayfayı temizle ve baştan yaz
-        ws.clear()
-        set_with_dataframe(ws, (df if isinstance(df, pd.DataFrame) else pd.DataFrame()))
+        # build values: header + rows
+        values: List[List[str]] = [list(map(str, df.columns.tolist()))]
+        if not df.empty:
+            values += df.astype(str).values.tolist()
+
+        # clear + update with one request; or just update to A1 to overwrite
+        try:
+            # clear can be expensive; directly updating is enough if range covers previous area
+            # use resize to fit new shape to minimize extra cells
+            _gs_backoff(ws.resize, rows=max(len(values), 1), cols=max(len(values[0]), 1))
+        except Exception:
+            pass
+
+        _gs_backoff(ws.update, "A1", values)
+        # store new signature
+        try:
+            _meta_set_sig(sh, name, sig)
+        except Exception:
+            pass
+
+        # small pause between sheets
+        time.sleep(0.5)
+
     _set_last_sheet_update_ts(time.time())
+
 
 def sync_local_and_sheet(auto: bool = True, path: str = "temp.xlsx") -> str:
     """Lokal temp.xlsx ile Google Sheets arasında çift yönlü senkron.
