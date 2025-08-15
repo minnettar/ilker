@@ -237,6 +237,7 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 
 LOGO_FILE_ID = "1DCxtSsAeR7Zfk2IQU0UMGmD0uTdNO1B3"
 LOGO_LOCAL_NAME = "logo1.png"
+EXCEL_FILE_ID = '1IF6CN4oHEMk6IEE40ZGixPkfnNHLYXnQ'
 EVRAK_KLASOR_ID = '14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J'
 FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
 
@@ -282,7 +283,7 @@ with col2:
     </div>
 """, unsafe_allow_html=True)
 
-downloaded = drive.CreateFile({'id': SHEET_ID})
+downloaded = drive.CreateFile({'id': EXCEL_FILE_ID})
 downloaded.FetchMetadata(fetch_all=True)
 downloaded.GetContentFile("temp.xlsx")
 
