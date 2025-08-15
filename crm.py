@@ -15,7 +15,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-SHEET_ID = "A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
+SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 
 # =============================
 # === CRM ILKER: Revizyon 1 ===
