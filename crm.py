@@ -24,7 +24,7 @@ import pandas as pd
 import pandas as _pd
 
 
-SHEET_ID, Union= "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
+SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 
 # =============================
 # === CRM ILKER: Revizyon 1 ===
