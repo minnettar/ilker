@@ -14,7 +14,6 @@ import sqlite3
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-
 SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 
 # =============================
@@ -257,10 +256,26 @@ _SCOPES = [
 ]
 
 @st.cache_resource(show_spinner=False)
+
+# --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
+import streamlit as st
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
+
+SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/spreadsheets",
+]
+
+@st.cache_resource(show_spinner=False)
 def get_drive():
-    """Google Drive istemcisi (Service Account). LocalWebserverAuth kullanılmaz."""
-    sa_info = dict(st.secrets["gcp_service_account"])  # secrets.toml veya Cloud Secrets
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scopes=_SCOPES)
+    """
+    Google Drive istemcisi (Service Account). LocalWebserverAuth kullanılmaz.
+    Streamlit Cloud'da Settings → Secrets içine gcp_service_account JSON'unu koy.
+    """
+    sa_info = dict(st.secrets["gcp_service_account"])  # veya doğrudan JSON dict
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scopes=SCOPES)
     gauth = GoogleAuth()
     gauth.credentials = creds
     return GoogleDrive(gauth)
