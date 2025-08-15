@@ -1,175 +1,16 @@
 import streamlit as st
 import pandas as pd
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-import io
-import os
-import datetime
-import smtplib
-from email.message import EmailMessage
 import numpy as np
-import tempfile
-import re
-import sqlite3
-from google.oauth2 import service_account
+import io, os, time, datetime, re, tempfile
+from email.message import EmailMessage
+import smtplib
+
+# Google API (Service Account ile)
+import gspread
+from google.oauth2.service_account import Credentials
+from gspread_dataframe import set_with_dataframe
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-
-SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
-
-# =============================
-# === CRM ILKER: Revizyon 1 ===
-# === Güvenli erişim & yardımcılar
-# =============================
-import json
-from typing import Optional, Any, Dict, List
-import streamlit as st
-
-# ---- Google Service Account ile Drive & Sheets istemcileri ----
-try:
-    import gspread
-    from google.oauth2.service_account import Credentials as _SA_Credentials
-    _HAS_GSPREAD = True
-except Exception:
-    _HAS_GSPREAD = False
-    _SA_Credentials = None
-
-from oauth2client.service_account import ServiceAccountCredentials as _LegacySA  # PyDrive2 için
-
-_SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-
-# ---- Kimlik / İstemci yardımcıları ----
-from typing import Any, Optional
-
-def _get_sa_info() -> dict:
-    """st.secrets['gcp_service_account'] içeriğini döndürür; yoksa boş dict."""
-    return dict(st.secrets.get("gcp_service_account", {}))
-
-@st.cache_resource(show_spinner=False)
-def get_drive_client():
-    """PyDrive2 için GoogleDrive istemcisi (Service Account) üretir."""
-    sa_info = _get_sa_info()
-    if not sa_info:
-        raise RuntimeError("Service Account bilgisi bulunamadı: st.secrets['gcp_service_account']")
-    credentials = _LegacySA.from_json_keyfile_dict(sa_info, scopes=_SCOPES)
-    gauth = GoogleAuth()
-    gauth.credentials = credentials
-    drive_client = GoogleDrive(gauth)
-    return drive_client
-
-@st.cache_resource(show_spinner=False)
-def get_gspread_client():
-    """Varsa gspread istemcisi döndürür; yoksa None."""
-    if not _HAS_GSPREAD or _SA_Credentials is None:
-        return None
-    sa_info = _get_sa_info()
-    creds = _SA_Credentials.from_service_account_info(sa_info, scopes=_SCOPES)
-    return gspread.authorize(creds)
-
-# ---- Lazy Drive yardımcıları (globalde kurma, ihtiyaçta kur) ----
-@st.cache_resource(show_spinner=False)
-def get_drive_or_none():
-    try:
-        return get_drive_client()
-    except Exception:
-        return None
-
-def ensure_drive():
-    """İhtiyaç anında Drive'ı kurar; kuramazsa None döner."""
-    key = "__drive_client__"
-    if key not in st.session_state:
-        st.session_state[key] = get_drive_or_none()
-    return st.session_state[key]
-
-# ---- Tarih & Para yardımcıları ----
-import pandas as _pd
-import numpy as _np
-
-def parse_date(s: Any) -> Optional[_pd.Timestamp]:
-    try:
-        return _pd.to_datetime(s)
-    except Exception:
-        return None
-
-def parse_money(x: Any) -> float:
-    if x is None:
-        return 0.0
-    if isinstance(x, (int, float)):
-        return float(x)
-    s = str(x).replace(".", "").replace(" ", "").replace("₺", "").replace("$", "").replace("€", "")
-    s = s.replace(",", ".")
-    try:
-        return float(s)
-    except Exception:
-        return 0.0
-
-def fmt_money(x: float, suffix: str = " USD") -> str:
-    try:
-        return f"{float(x):,.2f}{suffix}"
-    except Exception:
-        return f"{x}{suffix}"
-
-# ---- UI yardımcıları ----
-def confirm_modal(key: str, title: str, text: str) -> bool:
-    """Kritik işlemler için onay modalı. True -> onaylandı."""
-    opened = st.session_state.get(f"__modal_open_{key}", False)
-    if st.button(title, key=f"btn_open_{key}"):
-        st.session_state[f"__modal_open_{key}"] = True
-        opened = True
-    if opened:
-        with st.modal(title):
-            st.write(text)
-            c1, c2 = st.columns(2)
-            ok = c1.button("Onayla", key=f"ok_{key}")
-            cancel = c2.button("Vazgeç", key=f"cancel_{key}")
-            if ok:
-                st.session_state[f"__modal_open_{key}"] = False
-                return True
-            if cancel:
-                st.session_state[f"__modal_open_{key}"] = False
-                return False
-    return False
-
-# ---- Ana Sheet erişim yardımcıları ----
-import pandas as pd
-
-@st.cache_resource(show_spinner=False)
-def open_main_sheet():
-    """
-    Ana Google Sheet'i açar.
-    Öncelik: secrets.app.sheet_id -> yoksa kod içindeki SHEET_ID sabiti.
-    """
-    sheet_id = (st.secrets.get("app", {}).get("sheet_id", "") or SHEET_ID).strip()
-    if not sheet_id:
-        st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id girin veya SHEET_ID sabitini doldurun.")
-        st.stop()
-    gc = get_gspread_client()
-    if gc is None:
-        st.error("gspread istemcisi oluşturulamadı. Google Service Account ayarlarını kontrol edin.")
-        st.stop()
-    try:
-        return gc.open_by_key(sheet_id)
-    except Exception as e:
-        st.error(f"Ana Sheet açılamadı: {e}")
-        st.stop()
-
-@st.cache_data(ttl=300, show_spinner=False)
-def load_ws(ws_name: str) -> pd.DataFrame:
-    """Ana Sheet içindeki bir çalışma sayfasını DataFrame olarak döndürür."""
-    sh = open_main_sheet()
-    try:
-        ws = sh.worksheet(ws_name)
-    except Exception as e:
-        st.error(f"Çalışma sayfası bulunamadı: {ws_name} - {e}")
-        return pd.DataFrame()
-    rows = ws.get_all_records()
-    return pd.DataFrame(rows)
-    
-# === /Revizyon 1 bloğu ===
-# ===========================
 
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
 
@@ -207,176 +48,235 @@ if st.sidebar.button("Çıkış Yap"):
 
 # --- Ülke ve Temsilci Listeleri ---
 ulke_listesi = sorted([
-    "Afganistan", "Almanya", "Amerika Birleşik Devletleri", "Andorra", "Angola", "Antigua ve Barbuda", "Arjantin",
-    "Arnavutluk", "Avustralya", "Avusturya", "Azerbaycan", "Bahamalar", "Bahreyn", "Bangladeş", "Barbados", "Belçika",
-    "Belize", "Benin", "Beyaz Rusya", "Bhutan", "Birleşik Arap Emirlikleri", "Birleşik Krallık", "Bolivya",
-    "Bosna-Hersek", "Botsvana", "Brezilya", "Brunei", "Bulgaristan", "Burkina Faso", "Burundi", "Butan",
-    "Cezayir", "Çad", "Çekya", "Çin", "Danimarka", "Doğu Timor", "Dominik Cumhuriyeti", "Dominika", "Ekvador",
-    "Ekvator Ginesi", "El Salvador", "Endonezya", "Eritre", "Ermenistan", "Estonya", "Etiyopya", "Fas",
-    "Fiji", "Fildişi Sahili", "Filipinler", "Filistin", "Finlandiya", "Fransa", "Gabon", "Gambia",
-    "Gana", "Gine", "Gine-Bissau", "Grenada", "Guatemala", "Guyana", "Güney Afrika", "Güney Kore",
-    "Güney Sudan", "Gürcistan", "Haiti", "Hindistan", "Hırvatistan", "Hollanda", "Honduras", "Hong Kong",
-    "Irak", "İran", "İrlanda", "İspanya", "İsrail", "İsveç", "İsviçre", "İtalya", "İzlanda", "Jamaika",
-    "Japonya", "Kamboçya", "Kamerun", "Kanada", "Karadağ", "Katar", "Kazakistan", "Kenya", "Kırgızistan",
-    "Kiribati", "Kolombiya", "Komorlar", "Kongo", "Kongo Demokratik Cumhuriyeti", "Kostarika", "Küba",
-    "Kuveyt", "Kuzey Kore", "Kuzey Makedonya", "Laos", "Lesotho", "Letonya", "Liberya", "Libya",
-    "Liechtenstein", "Litvanya", "Lübnan", "Lüksemburg", "Macaristan", "Madagaskar", "Malavi", "Maldivler",
-    "Malezya", "Mali", "Malta", "Marshall Adaları", "Meksika", "Mısır", "Mikronezya", "Moğolistan", "Moldova",
-    "Monako", "Morityus", "Mozambik", "Myanmar", "Namibya", "Nauru", "Nepal", "Nijer", "Nijerya",
-    "Nikaragua", "Norveç", "Orta Afrika Cumhuriyeti", "Özbekistan", "Pakistan", "Palau", "Panama", "Papua Yeni Gine",
-    "Paraguay", "Peru", "Polonya", "Portekiz", "Romanya", "Ruanda", "Rusya", "Saint Kitts ve Nevis",
-    "Saint Lucia", "Saint Vincent ve Grenadinler", "Samoa", "San Marino", "Sao Tome ve Principe", "Senegal",
-    "Seyşeller", "Sırbistan", "Sierra Leone", "Singapur", "Slovakya", "Slovenya", "Solomon Adaları", "Somali",
-    "Sri Lanka", "Sudan", "Surinam", "Suriye", "Suudi Arabistan", "Svaziland", "Şili", "Tacikistan", "Tanzanya",
-    "Tayland", "Tayvan", "Togo", "Tonga", "Trinidad ve Tobago", "Tunus", "Tuvalu", "Türkiye", "Türkmenistan",
-    "Uganda", "Ukrayna", "Umman", "Uruguay", "Ürdün", "Vanuatu", "Vatikan", "Venezuela", "Vietnam",
-    "Yemen", "Yeni Zelanda", "Yunanistan", "Zambiya", "Zimbabve"
+    "Afganistan","Almanya","Amerika Birleşik Devletleri","Andorra","Angola","Antigua ve Barbuda","Arjantin",
+    "Arnavutluk","Avustralya","Avusturya","Azerbaycan","Bahamalar","Bahreyn","Bangladeş","Barbados","Belçika",
+    "Belize","Benin","Beyaz Rusya","Bhutan","Birleşik Arap Emirlikleri","Birleşik Krallık","Bolivya",
+    "Bosna-Hersek","Botsvana","Brezilya","Brunei","Bulgaristan","Burkina Faso","Burundi","Butan",
+    "Cezayir","Çad","Çekya","Çin","Danimarka","Doğu Timor","Dominik Cumhuriyeti","Dominika","Ekvador",
+    "Ekvator Ginesi","El Salvador","Endonezya","Eritre","Ermenistan","Estonya","Etiyopya","Fas",
+    "Fiji","Fildişi Sahili","Filipinler","Filistin","Finlandiya","Fransa","Gabon","Gambia",
+    "Gana","Gine","Gine-Bissau","Grenada","Guatemala","Guyana","Güney Afrika","Güney Kore",
+    "Güney Sudan","Gürcistan","Haiti","Hindistan","Hırvatistan","Hollanda","Honduras","Hong Kong",
+    "Irak","İran","İrlanda","İspanya","İsrail","İsveç","İsviçre","İtalya","İzlanda","Jamaika",
+    "Japonya","Kamboçya","Kamerun","Kanada","Karadağ","Katar","Kazakistan","Kenya","Kırgızistan",
+    "Kiribati","Kolombiya","Komorlar","Kongo","Kongo Demokratik Cumhuriyeti","Kostarika","Küba",
+    "Kuveyt","Kuzey Kore","Kuzey Makedonya","Laos","Lesotho","Letonya","Liberya","Libya",
+    "Liechtenstein","Litvanya","Lübnan","Lüksemburg","Macaristan","Madagaskar","Malavi","Maldivler",
+    "Malezya","Mali","Malta","Marshall Adaları","Meksika","Mısır","Mikronezya","Moğolistan","Moldova",
+    "Monako","Morityus","Mozambik","Myanmar","Namibya","Nauru","Nepal","Nijer","Nijerya",
+    "Nikaragua","Norveç","Orta Afrika Cumhuriyeti","Özbekistan","Pakistan","Palau","Panama","Papua Yeni Gine",
+    "Paraguay","Peru","Polonya","Portekiz","Romanya","Ruanda","Rusya","Saint Kitts ve Nevis",
+    "Saint Lucia","Saint Vincent ve Grenadinler","Samoa","San Marino","Sao Tome ve Principe","Senegal",
+    "Seyşeller","Sırbistan","Sierra Leone","Singapur","Slovakya","Slovenya","Solomon Adaları","Somali",
+    "Sri Lanka","Sudan","Surinam","Suriye","Suudi Arabistan","Svaziland","Şili","Tacikistan","Tanzanya",
+    "Tayland","Tayvan","Togo","Tonga","Trinidad ve Tobago","Tunus","Tuvalu","Türkiye","Türkmenistan",
+    "Uganda","Ukrayna","Umman","Uruguay","Ürdün","Vanuatu","Vatikan","Venezuela","Vietnam",
+    "Yemen","Yeni Zelanda","Yunanistan","Zambiya","Zimbabve"
 ]) + ["Diğer"]
 
 temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIRIM", "FERHAT ŞEKEROĞLU"]
 
+# ===== Sabit ID'ler =====
+SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 LOGO_FILE_ID = "1DCxtSsAeR7Zfk2IQU0UMGmD0uTdNO1B3"
 LOGO_LOCAL_NAME = "logo1.png"
-EXCEL_FILE_ID = '1IF6CN4oHEMk6IEE40ZGixPkfnNHLYXnQ'
-EVRAK_KLASOR_ID = '14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J'
-FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
+EVRAK_KLASOR_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"
+FIYAT_TEKLIFI_ID = "1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65"
 
+LOCAL_EXCEL = "temp.xlsx"
+SYNC_INTERVAL = 30  # yazma debounce (saniye) → 429'a düşmemek için
 
+EXPECTED_SHEETS = [
+    "Sayfa1", "Kayıtlar", "Teklifler", "Proformalar", "Evraklar", "ETA", "FuarMusteri"
+]
 
-# --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-from oauth2client.service_account import ServiceAccountCredentials
-
+# ===== Google Auth (st.secrets ile) =====
 _SCOPES = [
-    "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
 ]
 
 @st.cache_resource(show_spinner=False)
-def get_drive():
-    """Google Drive istemcisi (Service Account). LocalWebserverAuth kullanılmaz."""
-    sa_info = dict(st.secrets["gcp_service_account"])  # secrets.toml veya Cloud Secrets
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scopes=_SCOPES)
-    gauth = GoogleAuth()
-    gauth.credentials = creds
-    return GoogleDrive(gauth)
+def get_gspread_client():
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=_SCOPES)
+    return gspread.authorize(creds)
 
-drive = get_drive()
+@st.cache_resource(show_spinner=False)
+def get_drive_service():
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=_SCOPES)
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
-if not os.path.exists(LOGO_LOCAL_NAME):
-    logo_file = drive.CreateFile({'id': LOGO_FILE_ID})
-    logo_file.GetContentFile(LOGO_LOCAL_NAME)
+GC = get_gspread_client()
+DRIVE = get_drive_service()
 
+def ensure_logo():
+    if os.path.exists(LOGO_LOCAL_NAME):
+        return
+    try:
+        req = DRIVE.files().get_media(fileId=LOGO_FILE_ID)
+        with open(LOGO_LOCAL_NAME, "wb") as fh:
+            downloader = MediaIoBaseDownload(fh, req)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+    except Exception as e:
+        st.warning(f"Logo indirilemedi: {e}")
+
+def ensure_worksheets():
+    sh = GC.open_by_key(SHEET_ID)
+    have = {ws.title for ws in sh.worksheets()}
+    for name in EXPECTED_SHEETS:
+        if name not in have:
+            sh.add_worksheet(title=name, rows=1000, cols=26)
+
+# ===== Sheets / Local I/O =====
+_last_sync_time = 0.0
+
+def _debounce_ok() -> bool:
+    global _last_sync_time
+    now = time.time()
+    if (now - _last_sync_time) < SYNC_INTERVAL:
+        return False
+    _last_sync_time = now
+    return True
+
+def read_all_from_sheet() -> dict:
+    sh = GC.open_by_key(SHEET_ID)
+    dfs = {}
+    for name in EXPECTED_SHEETS:
+        ws = sh.worksheet(name)
+        dfs[name] = pd.DataFrame(ws.get_all_records())
+    return dfs
+
+def write_all_to_sheet(dfs: dict):
+    if not _debounce_ok():
+        return
+    sh = GC.open_by_key(SHEET_ID)
+    for name in EXPECTED_SHEETS:
+        df = dfs.get(name, pd.DataFrame())
+        ws = sh.worksheet(name)
+        ws.clear()
+        if not df.empty:
+            set_with_dataframe(ws, df)
+
+def read_all_from_local(path: str = LOCAL_EXCEL) -> dict:
+    dfs = {}
+    if not os.path.exists(path):
+        return dfs
+    for name in EXPECTED_SHEETS:
+        try:
+            dfs[name] = pd.read_excel(path, sheet_name=name)
+        except Exception:
+            dfs[name] = pd.DataFrame()
+    return dfs
+
+def write_all_to_local(dfs: dict, path: str = LOCAL_EXCEL):
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        for name in EXPECTED_SHEETS:
+            (dfs.get(name, pd.DataFrame())).to_excel(writer, sheet_name=name, index=False)
+
+# ===== Global DF seti & aliaslar =====
+_dfs = {name: pd.DataFrame() for name in EXPECTED_SHEETS}
+
+def _alias_bind():
+    globals()["df_musteri"]      = _dfs["Sayfa1"]
+    globals()["df_kayit"]        = _dfs["Kayıtlar"]
+    globals()["df_teklif"]       = _dfs["Teklifler"]
+    globals()["df_proforma"]     = _dfs["Proformalar"]
+    globals()["df_evrak"]        = _dfs["Evraklar"]
+    globals()["df_eta"]          = _dfs["ETA"]
+    globals()["df_fuar_musteri"] = _dfs["FuarMusteri"]
+
+def _init_dataframes():
+    ensure_worksheets()
+    if not os.path.exists(LOCAL_EXCEL):
+        # temp.xlsx yoksa Sheets'ten indir
+        with st.spinner("İlk veri indiriliyor..."):
+            sheet_dfs = read_all_from_sheet()
+            # Boş sayfalar minimum kolonlarla başlasın
+            if sheet_dfs.get("Sayfa1", pd.DataFrame()).empty:
+                sheet_dfs["Sayfa1"] = pd.DataFrame(columns=[
+                    "Müşteri Adı","Telefon","E-posta","Adres","Ülke",
+                    "Satış Temsilcisi","Kategori","Durum","Vade (Gün)","Ödeme Şekli",
+                    "Para Birimi","DT Seçimi"
+                ])
+            if sheet_dfs.get("Kayıtlar", pd.DataFrame()).empty:
+                sheet_dfs["Kayıtlar"] = pd.DataFrame(columns=["Müşteri Adı","Tarih","Tip","Açıklama"])
+            if sheet_dfs.get("Teklifler", pd.DataFrame()).empty:
+                sheet_dfs["Teklifler"] = pd.DataFrame(columns=[
+                    "Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama","Durum","PDF"
+                ])
+            if sheet_dfs.get("Proformalar", pd.DataFrame()).empty:
+                sheet_dfs["Proformalar"] = pd.DataFrame(columns=[
+                    "Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama","Durum","PDF",
+                    "Sipariş Formu","Vade (gün)","Sevk Durumu","Termin Tarihi","Ulaşma Tarihi",
+                    "Ülke","Satış Temsilcisi","Ödeme Şekli"
+                ])
+            if sheet_dfs.get("Evraklar", pd.DataFrame()).empty:
+                sheet_dfs["Evraklar"] = pd.DataFrame(columns=[
+                    "Müşteri Adı","Proforma No","Fatura No","Fatura Tarihi","Vade (gün)","Vade Tarihi","Tutar",
+                    "Ülke","Satış Temsilcisi","Ödeme Şekli",
+                    "Commercial Invoice","Sağlık Sertifikası","Packing List","Konşimento","İhracat Beyannamesi",
+                    "Fatura PDF","Sipariş Formu","Yük Resimleri","EK Belgeler","Ödendi","Ödeme Kanıtı"
+                ])
+            if sheet_dfs.get("ETA", pd.DataFrame()).empty:
+                sheet_dfs["ETA"] = pd.DataFrame(columns=["Müşteri Adı","Proforma No","ETA Tarihi","Açıklama"])
+            if sheet_dfs.get("FuarMusteri", pd.DataFrame()).empty:
+                sheet_dfs["FuarMusteri"] = pd.DataFrame(columns=[
+                    "Fuar Adı","Müşteri Adı","Ülke","Telefon","E-mail",
+                    "Satış Temsilcisi","Açıklamalar","Görüşme Kalitesi","Tarih"
+                ])
+
+            write_all_to_local(sheet_dfs, LOCAL_EXCEL)
+            _dfs.update(sheet_dfs)
+    else:
+        # temp.xlsx varsa ordan oku
+        _dfs_local = read_all_from_local(LOCAL_EXCEL)
+        _dfs.update(_dfs_local)
+
+    _alias_bind()
+
+# ===== Tek nokta kayıt API =====
+def set_df(sheet_name: str, df: pd.DataFrame, autosave: bool = True):
+    _dfs[sheet_name] = df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    _alias_bind()
+    if autosave:
+        # önce lokali güncelle, sonra Sheets'e yaz (debounce)
+        write_all_to_local(_dfs, LOCAL_EXCEL)
+        write_all_to_sheet(_dfs)
+
+def save_all():
+    write_all_to_local(_dfs, LOCAL_EXCEL)
+    write_all_to_sheet(_dfs)
+
+# ===== Başlatma =====
+with st.spinner("Veri seti hazırlanıyor..."):
+    _init_dataframes()
+
+# ===== Logo & Header =====
+ensure_logo()
 col1, col2 = st.columns([3, 7])
 with col1:
-    st.image(LOGO_LOCAL_NAME, width=300)
+    if os.path.exists(LOGO_LOCAL_NAME):
+        st.image(LOGO_LOCAL_NAME, width=300)
 with col2:
- st.markdown("""
-    <style>
-    .block-container { padding-top: 0.2rem !important; }
-    </style>
-    <div style="display:flex; flex-direction:column; align-items:flex-start; width:100%; margin-bottom:10px;">
-        <h1 style="color: #219A41; font-weight: bold; font-size: 2.8em; letter-spacing:2px; margin:0; margin-top:-8px;">
-            ŞEKEROĞLU İHRACAT CRM
-        </h1>
-    </div>
-""", unsafe_allow_html=True)
+    st.markdown("""
+        <style>.block-container { padding-top: 0.2rem !important; }</style>
+        <div style="display:flex; flex-direction:column; align-items:flex-start; width:100%; margin-bottom:10px;">
+            <h1 style="color: #219A41; font-weight: bold; font-size: 2.8em; letter-spacing:2px; margin:0; margin-top:-8px;">
+                ŞEKEROĞLU İHRACAT CRM
+            </h1>
+        </div>
+    """, unsafe_allow_html=True)
 
-downloaded = drive.CreateFile({'id': EXCEL_FILE_ID})
-downloaded.FetchMetadata(fetch_all=True)
-downloaded.GetContentFile("temp.xlsx")
-
-# --- Dataframe yükleme ---
-if os.path.exists("temp.xlsx"):
-    try:
-        df_musteri = pd.read_excel("temp.xlsx", sheet_name=0)
-    except Exception:
-        df_musteri = pd.DataFrame(columns=[
-            "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke", "Satış Temsilcisi", "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli"
-        ])
-    try:
-        df_kayit = pd.read_excel("temp.xlsx", sheet_name="Kayıtlar")
-    except Exception:
-        df_kayit = pd.DataFrame(columns=["Müşteri Adı", "Tarih", "Tip", "Açıklama"])
-    try:
-        df_teklif = pd.read_excel("temp.xlsx", sheet_name="Teklifler")
-    except Exception:
-        df_teklif = pd.DataFrame(columns=[
-            "Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama", "Durum", "PDF"
-        ])
-    try:
-        df_proforma = pd.read_excel("temp.xlsx", sheet_name="Proformalar")
-        for col in ["Proforma No", "Vade", "Sevk Durumu"]:
-            if col not in df_proforma.columns:
-                df_proforma[col] = ""
-    except Exception:
-        df_proforma = pd.DataFrame(columns=[
-            "Müşteri Adı", "Tarih", "Proforma No", "Tutar", "Açıklama", "Durum", "PDF", "Sipariş Formu", "Vade", "Sevk Durumu"
-        ])
-    try:
-        df_evrak = pd.read_excel("temp.xlsx", sheet_name="Evraklar")
-        for col in ["Yük Resimleri", "EK Belgeler"]:
-            if col not in df_evrak.columns:
-                df_evrak[col] = ""
-    except Exception:
-        df_evrak = pd.DataFrame(columns=[
-            "Müşteri Adı", "Fatura No", "Fatura Tarihi", "Vade Tarihi", "Tutar",
-            "Commercial Invoice", "Sağlık Sertifikası", "Packing List",
-            "Konşimento", "İhracat Beyannamesi", "Fatura PDF", "Sipariş Formu",
-            "Yük Resimleri", "EK Belgeler"
-        ])
-    try:
-        df_eta = pd.read_excel("temp.xlsx", sheet_name="ETA")
-    except Exception:
-        df_eta = pd.DataFrame(columns=["Müşteri Adı", "Proforma No", "ETA Tarihi", "Açıklama"])
-    try:
-        df_fuar_musteri = pd.read_excel("temp.xlsx", sheet_name="FuarMusteri")
-    except Exception:
-        df_fuar_musteri = pd.DataFrame(columns=[
-            "Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail", "Açıklamalar", "Tarih"
-        ])
-else:
-    df_musteri = pd.DataFrame(columns=[
-        "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke", "Satış Temsilcisi", "Kategori", "Durum", "Vade (Gün)", "Ödeme Şekli"
-    ])
-    df_kayit = pd.DataFrame(columns=["Müşteri Adı", "Tarih", "Tip", "Açıklama"])
-    df_teklif = pd.DataFrame(columns=[
-        "Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama", "Durum", "PDF"
-    ])
-    df_proforma = pd.DataFrame(columns=[
-        "Müşteri Adı", "Tarih", "Proforma No", "Tutar", "Açıklama", "Durum", "PDF", "Sipariş Formu", "Vade", "Sevk Durumu"
-    ])
-    df_evrak = pd.DataFrame(columns=[
-        "Müşteri Adı", "Fatura No", "Fatura Tarihi", "Vade Tarihi", "Tutar",
-        "Commercial Invoice", "Sağlık Sertifikası", "Packing List",
-        "Konşimento", "İhracat Beyannamesi", "Fatura PDF", "Sipariş Formu",
-        "Yük Resimleri", "EK Belgeler"
-    ])
-    df_eta = pd.DataFrame(columns=["Müşteri Adı", "Proforma No", "ETA Tarihi", "Açıklama"])
-    df_fuar_musteri = pd.DataFrame(columns=[
-        "Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail", "Açıklamalar", "Tarih"
-    ])
-
+# ===== Geriye dönük uyumluluk (eski çağrılar kırılmasın) =====
 def update_excel():
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df_musteri.to_excel(writer, sheet_name="Sayfa1", index=False)
-        df_kayit.to_excel(writer, sheet_name="Kayıtlar", index=False)
-        df_teklif.to_excel(writer, sheet_name="Teklifler", index=False)
-        df_proforma.to_excel(writer, sheet_name="Proformalar", index=False)
-        df_evrak.to_excel(writer, sheet_name="Evraklar", index=False)
-        df_eta.to_excel(writer, sheet_name="ETA", index=False)
-        df_fuar_musteri.to_excel(writer, sheet_name="FuarMusteri", index=False)
-    buffer.seek(0)
-    with open("temp.xlsx", "wb") as f:
-        f.write(buffer.read())
-    downloaded.SetContentFile("temp.xlsx")
-    downloaded.Upload()
+    """ESKİ API: İçeride yeni save_all()'ı çağırır."""
+    save_all()
 
 # ========= ŞIK SIDEBAR MENÜ (RADIO TABANLI) =========
-
-# ========= ŞIK SIDEBAR MENÜ (RADIO + ANINDA STATE) =========
+# (Not: Boss kullanıcıda menü kısıtlı olduğu için CSS nth-child arka plan renkleri
+# allowed_menus sırasına göre uygulanır; fonksiyonellikte sorun yok.)
 
 # 1) Menü tanımı (ikonlar)
 menuler = [
@@ -448,7 +348,7 @@ div[data-testid="stSidebar"] .stRadio label:nth-child(14) { background: linear-g
 
 # 6) Callback: seçilince anında state yaz
 def _on_menu_change():
-    sel_label = st.session_state.menu_radio_label
+    sel_label = st.session_state.get("menu_radio_label")
     st.session_state.menu_state = name_by_label.get(sel_label, allowed_menus[0][0])
 
 # 7) Radio’yu mevcut state’e göre başlat
@@ -469,236 +369,98 @@ menu = st.session_state.menu_state
 # ========= /ŞIK MENÜ =========
 
 
-
+# ========== E-Posta Yardımcıları ==========
 import smtplib
 from email.message import EmailMessage
 
-# Yeni cari için txt dosyasını oluşturma fonksiyonu
 def yeni_cari_txt_olustur(cari_dict, file_path="yeni_cari.txt"):
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(
-            f"Müşteri Adı: {cari_dict['Müşteri Adı']}\n"
-            f"Telefon: {cari_dict['Telefon']}\n"
-            f"E-posta: {cari_dict['E-posta']}\n"
-            f"Adres: {cari_dict['Adres']}\n"
-            f"Ülke: {cari_dict.get('Ülke', '')}\n"
-            f"Satış Temsilcisi: {cari_dict.get('Satış Temsilcisi', '')}\n"
-            f"Kategori: {cari_dict.get('Kategori', '')}\n"
-            f"Durum: {cari_dict.get('Durum', '')}\n"
-            f"Vade (Gün): {cari_dict.get('Vade (Gün)', '')}\n"
-            f"Ödeme Şekli: {cari_dict.get('Ödeme Şekli', '')}\n"
-            f"Para Birimi: {cari_dict.get('Para Birimi', '')}\n"  # Para birimini de ekliyoruz
-            f"DT Seçimi: {cari_dict.get('DT Seçimi', '')}\n"  # DT seçimini de ekliyoruz
+            f"Müşteri Adı: {cari_dict.get('Müşteri Adı','')}\n"
+            f"Telefon: {cari_dict.get('Telefon','')}\n"
+            f"E-posta: {cari_dict.get('E-posta','')}\n"
+            f"Adres: {cari_dict.get('Adres','')}\n"
+            f"Ülke: {cari_dict.get('Ülke','')}\n"
+            f"Satış Temsilcisi: {cari_dict.get('Satış Temsilcisi','')}\n"
+            f"Kategori: {cari_dict.get('Kategori','')}\n"
+            f"Durum: {cari_dict.get('Durum','')}\n"
+            f"Vade (Gün): {cari_dict.get('Vade (Gün)','')}\n"
+            f"Ödeme Şekli: {cari_dict.get('Ödeme Şekli','')}\n"
+            f"Para Birimi: {cari_dict.get('Para Birimi','')}\n"
+            f"DT Seçimi: {cari_dict.get('DT Seçimi','')}\n"
         )
 
-# E-posta göndermek için fonksiyon
 def send_email_with_txt(to_email, subject, body, file_path):
-    from_email = "todo@sekeroglugroup.com"  # Gönderen e-posta adresi
-    password = "vbgvforwwbcpzhxf"  # Gönderen e-posta şifresi
+    from_email = "todo@sekeroglugroup.com"
+    password = "vbgvforwwbcpzhxf"
 
-    # E-posta mesajını oluştur
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = from_email
-    msg["To"] = ", ".join(to_email)  # Birden fazla alıcıyı virgülle ayırarak ekliyoruz
+    msg["To"] = ", ".join(to_email) if isinstance(to_email, (list, tuple)) else str(to_email)
     msg.set_content(body)
 
-    # TXT dosyasını e-postaya ekle
     with open(file_path, "rb") as f:
-        msg.add_attachment(
-            f.read(),
-            maintype="text",
-            subtype="plain",
-            filename="yeni_cari.txt"  # Dosyanın ismi
-        )
+        msg.add_attachment(f.read(), maintype="text", subtype="plain", filename="yeni_cari.txt")
 
-    # E-posta göndermek için SMTP kullan
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(from_email, password)
         smtp.send_message(msg)
-
-# ===========================
-# --- ÖZET EKRAN (Vade herkese açık) ---
-# ===========================
-
-if menu == "Özet Ekran":
-    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>📊 Özet Ekran</h2>", unsafe_allow_html=True)
-
-    # --- Akıllı sayı dönüştürücü (USD/EUR/TL, . , ) ---
-    def smart_to_num(x):
-        if pd.isna(x): 
-            return 0.0
-        s = str(x).strip()
-        for sym in ["USD", "$", "€", "EUR", "₺", "TL", "tl", "Tl"]:
-            s = s.replace(sym, "")
-        s = s.replace("\u00A0", "").replace(" ", "")
-        try:
-            return float(s)              # US format
-        except:
-            pass
-        if "," in s:
-            try:
-                return float(s.replace(".", "").replace(",", "."))  # EU format
-            except:
-                pass
-        return 0.0
-
-    # ---------- df_evrak güvenliği + toplam fatura ----------
-    toplam_fatura_tutar = 0.0
-    if "Tutar" in df_evrak.columns and not df_evrak.empty:
-        _ev = df_evrak.copy()
-        _ev["Tutar_num"] = _ev["Tutar"].apply(smart_to_num).fillna(0.0)
-        toplam_fatura_tutar = float(_ev["Tutar_num"].sum())
-    st.markdown(f"<div style='font-size:1.4em; color:#B22222; font-weight:bold;'>💰 Toplam Fatura Tutarı: {toplam_fatura_tutar:,.2f} USD</div>", unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # ---------- VADE DURUMU (HERKESE AÇIK) ----------
-    # Kolon güvenliği
-    for col in ["Vade Tarihi", "Ödendi", "Tutar"]:
-        if col not in df_evrak.columns:
-            df_evrak[col] = "" if col != "Ödendi" else False
-
-    vade_df_all = df_evrak.copy()
-    vade_df_all["Ödendi"] = vade_df_all["Ödendi"].fillna(False).astype(bool)
-    vade_df_all["Vade Tarihi"] = pd.to_datetime(vade_df_all["Vade Tarihi"], errors="coerce")
-    vade_df_all["Tutar_num"] = vade_df_all["Tutar"].apply(smart_to_num).fillna(0.0)
-
-    today_norm = pd.Timestamp.today().normalize()
-    od_me = ~vade_df_all["Ödendi"]
-
-    m_gelmemis = (vade_df_all["Vade Tarihi"] > today_norm) & od_me
-    m_bugun     = (vade_df_all["Vade Tarihi"].dt.date == today_norm.date()) & od_me
-    m_gecikmis  = (vade_df_all["Vade Tarihi"] < today_norm) & od_me
-
-    sum_gelmemis = float(vade_df_all.loc[m_gelmemis, "Tutar_num"].sum())
-    sum_bugun    = float(vade_df_all.loc[m_bugun,    "Tutar_num"].sum())
-    sum_gecikmis = float(vade_df_all.loc[m_gecikmis, "Tutar_num"].sum())
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("📅 Vadesi Gelmemiş", f"{sum_gelmemis:,.2f} USD", f"{int(m_gelmemis.sum())} Fatura")
-    c2.metric("⚠️ Bugün Vadesi Dolan", f"{sum_bugun:,.2f} USD", f"{int(m_bugun.sum())} Fatura")
-    c3.metric("⛔ Gecikmiş", f"{sum_gecikmis:,.2f} USD", f"{int(m_gecikmis.sum())} Fatura")
-
-    # Açık vade listesi (ödenmemiş)
-    acik_vadeler = vade_df_all[vade_df_all["Vade Tarihi"].notna() & (~vade_df_all["Ödendi"])].copy()
-    if not acik_vadeler.empty:
-        acik_vadeler["Kalan Gün"] = (acik_vadeler["Vade Tarihi"] - today_norm).dt.days
-        st.markdown("#### 💸 Açık Vade Kayıtları")
-        cols_show = ["Müşteri Adı", "Ülke", "Fatura No", "Vade Tarihi", "Tutar", "Kalan Gün"]
-        cols_show = [c for c in cols_show if c in acik_vadeler.columns]
-        # Tarih güzel format
-        if "Vade Tarihi" in cols_show:
-            acik_vadeler["Vade Tarihi"] = pd.to_datetime(acik_vadeler["Vade Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
-        st.dataframe(acik_vadeler[cols_show].sort_values("Kalan Gün"), use_container_width=True)
-    else:
-        st.info("Açık vade kaydı yok.")
-
-    st.markdown("---")
-
-    # ---------- Bekleyen Teklifler ----------
-    st.markdown("### 💰 Bekleyen Teklifler")
-    bekleyen_teklifler = df_teklif[df_teklif["Durum"] == "Açık"] if "Durum" in df_teklif.columns else pd.DataFrame()
-    try:
-        toplam_teklif = pd.to_numeric(bekleyen_teklifler["Tutar"], errors="coerce").sum()
-    except Exception:
-        toplam_teklif = 0
-    st.markdown(f"<div style='font-size:1.1em; color:#11998e; font-weight:bold;'>Toplam: {toplam_teklif:,.2f} $</div>", unsafe_allow_html=True)
-    if bekleyen_teklifler.empty:
-        st.info("Bekleyen teklif yok.")
-    else:
-        st.dataframe(
-            bekleyen_teklifler[["Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama"]],
-            use_container_width=True
-        )
-
-    # ---------- Bekleyen Proformalar ----------
-    st.markdown("### 📄 Bekleyen Proformalar")
-    bekleyen_proformalar = df_proforma[df_proforma["Durum"] == "Beklemede"] if "Durum" in df_proforma.columns else pd.DataFrame()
-    try:
-        toplam_proforma = pd.to_numeric(bekleyen_proformalar["Tutar"], errors="coerce").sum()
-    except Exception:
-        toplam_proforma = 0
-    st.markdown(f"<div style='font-size:1.1em; color:#f7971e; font-weight:bold;'>Toplam: {toplam_proforma:,.2f} $</div>", unsafe_allow_html=True)
-    if bekleyen_proformalar.empty:
-        st.info("Bekleyen proforma yok.")
-    else:
-        st.dataframe(
-            bekleyen_proformalar[["Müşteri Adı", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]],
-            use_container_width=True
-        )
-
-    # ---------- Sevk Bekleyen (Termin dahil) ----------
-    st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
-    for col in ["Sevk Durumu", "Ülke", "Termin Tarihi"]:
-        if col not in df_proforma.columns:
-            df_proforma[col] = ""
-    sevk_bekleyenler = df_proforma[
-        (df_proforma["Durum"] == "Siparişe Dönüştü") &
-        (~df_proforma["Sevk Durumu"].isin(["Sevkedildi", "Ulaşıldı"]))
-    ] if "Durum" in df_proforma.columns else pd.DataFrame()
-    try:
-        toplam_siparis = pd.to_numeric(sevk_bekleyenler["Tutar"], errors="coerce").sum()
-    except Exception:
-        toplam_siparis = 0
-    st.markdown(f"<div style='font-size:1.1em; color:#185a9d; font-weight:bold;'>Toplam: {toplam_siparis:,.2f} $</div>", unsafe_allow_html=True)
-
-    if sevk_bekleyenler.empty:
-        st.info("Sevk bekleyen sipariş yok.")
-    else:
-        disp = sevk_bekleyenler.copy()
-        disp["Tarih"] = pd.to_datetime(disp["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-        disp["Termin Tarihi"] = pd.to_datetime(disp["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
-        st.dataframe(
-            disp[["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Termin Tarihi", "Tutar", "Vade (gün)", "Açıklama"]],
-            use_container_width=True
-        )
-
-    # ---------- Yolda Olan (Sevkedildi) ----------
-    st.markdown("### ⏳ Yolda Olan (ETA Takibi) Siparişler")
-    eta_yolda = df_proforma[(df_proforma["Sevk Durumu"] == "Sevkedildi")] if "Sevk Durumu" in df_proforma.columns else pd.DataFrame()
-    try:
-        toplam_eta = pd.to_numeric(eta_yolda["Tutar"], errors="coerce").sum()
-    except Exception:
-        toplam_eta = 0
-    st.markdown(f"<div style='font-size:1.1em; color:#c471f5; font-weight:bold;'>Toplam: {toplam_eta:,.2f} $</div>", unsafe_allow_html=True)
-    if eta_yolda.empty:
-        st.info("Yolda olan (sevk edilmiş) sipariş yok.")
-    else:
-        eta_disp = eta_yolda.copy()
-        eta_disp["Tarih"] = pd.to_datetime(eta_disp["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-        st.dataframe(
-            eta_disp[["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]],
-            use_container_width=True
-        )
-
-    # ---------- Son Teslim Edilen 5 Sipariş ----------
-    st.markdown("### ✅ Son Teslim Edilen (Ulaşıldı) 5 Sipariş")
-    if "Sevk Durumu" in df_proforma.columns:
-        teslim_edilenler = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"]
-        if not teslim_edilenler.empty:
-            teslim_edilenler = teslim_edilenler.sort_values(by="Tarih", ascending=False).head(5).copy()
-            teslim_edilenler["Tarih"] = pd.to_datetime(teslim_edilenler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
-            st.dataframe(
-                teslim_edilenler[["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]],
-                use_container_width=True
-            )
-        else:
-            st.info("Teslim edilmiş sipariş yok.")
-    else:
-        st.info("Teslim edilmiş sipariş yok.")
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.info("Detay işlemler için soldaki menülerden ilgili bölümlere geçebilirsiniz.")
-
-
-
 
 ### ===========================
 ### === CARİ EKLEME MENÜSÜ ===
 ### ===========================
 
-# Cari Ekleme Formu Güncelleme
+# Google Sheets'e (SHEET_ID) yazan yardımcı (429 backoff'lu)
+def _write_customers_to_gsheet(df_customers: pd.DataFrame) -> bool:
+    try:
+        import time
+        import gspread
+        from google.oauth2.service_account import Credentials as _SA_Credentials
+        from gspread_dataframe import set_with_dataframe
+
+        # Service Account bilgisi secrets'tan okunur
+        sa_info = dict(st.secrets.get("gcp_service_account", {}))
+        if not sa_info:
+            return False
+
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = _SA_Credentials.from_service_account_info(sa_info, scopes=scopes)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(SHEET_ID)
+
+        try:
+            ws = sh.worksheet("Sayfa1")
+        except Exception:
+            ws = sh.add_worksheet(title="Sayfa1", rows=1000, cols=26)
+
+        # 429 kotasına karşı 3 deneme (0.8s, 1.6s, 3.2s)
+        delay = 0.8
+        for attempt in range(3):
+            try:
+                ws.clear()
+                set_with_dataframe(ws, df_customers.fillna(""))
+                return True
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg or "Quota exceeded" in msg:
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+                else:
+                    # 429 dışı hata → fallback
+                    return False
+        # 3 deneme de 429 ile sonuçlanırsa False
+        return False
+
+    except Exception:
+        return False
+
+
+# Cari Ekleme Formu
 if menu == "Cari Ekleme":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Yeni Müşteri Ekle</h2>", unsafe_allow_html=True)
     with st.form("add_customer"):
@@ -712,52 +474,61 @@ if menu == "Cari Ekleme":
         aktif_pasif = st.selectbox("Durum", ["Aktif", "Pasif"])
         vade_gun = st.number_input("Vade (Gün Sayısı)", min_value=0, max_value=365, value=0, step=1)
         odeme_sekli = st.selectbox("Ödeme Şekli", ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"])
-
-        # Yeni Para Birimi Seçeneği Ekledik
         para_birimi = st.selectbox("Para Birimi", ["EURO", "USD", "TL", "RUBLE"])
-
-        # Yeni DT Seçeneklerini Ekledik (DT-1, DT-2, DT-3, DT-4)
         dt_secim = st.selectbox("DT Seçin", ["DT-1", "DT-2", "DT-3", "DT-4"])
 
         submitted = st.form_submit_button("Kaydet")
-        if submitted:
-            if name.strip() == "":
-                st.error("Müşteri adı boş olamaz!")
-            else:
-                new_row = {
-                    "Müşteri Adı": name,
-                    "Telefon": phone,
-                    "E-posta": email,
-                    "Adres": address,
-                    "Ülke": ulke,
-                    "Satış Temsilcisi": temsilci,
-                    "Kategori": kategori,
-                    "Durum": aktif_pasif,
-                    "Vade (Gün)": vade_gun,
-                    "Ödeme Şekli": odeme_sekli,
-                    "Para Birimi": para_birimi,  # Para birimini ekliyoruz
-                    "DT Seçimi": dt_secim  # DT seçimini ekliyoruz
-                }
-                df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
+
+    if submitted:
+        if name.strip() == "":
+            st.error("Müşteri adı boş olamaz!")
+        else:
+            new_row = {
+                "Müşteri Adı": name,
+                "Telefon": phone,
+                "E-posta": email,
+                "Adres": address,
+                "Ülke": ulke,
+                "Satış Temsilcisi": temsilci,
+                "Kategori": kategori,
+                "Durum": aktif_pasif,
+                "Vade (Gün)": vade_gun,
+                "Ödeme Şekli": odeme_sekli,
+                "Para Birimi": para_birimi,
+                "DT Seçimi": dt_secim,
+            }
+            # DataFrame'e ekle
+            df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
+
+            # Önce Google Sheets'e yazmayı dene (429 backoff'lu)
+            wrote_sheet = _write_customers_to_gsheet(df_musteri)
+
+            # Her durumda lokal temp.xlsx'i güncelle (senin mevcut fonksiyonun)
+            try:
                 update_excel()
+            except Exception as e:
+                st.warning(f"Yerel temp.xlsx güncellenemedi: {e}")
 
-                # Yeni cari için TXT oluştur ve maille gönder
+            # Mail + TXT
+            try:
                 yeni_cari_txt_olustur(new_row)
-                try:
-                    send_email_with_txt(
-                        to_email=["muhasebe@sekeroglugroup.com", "h.boy@sekeroglugroup.com"],  # Birden fazla alıcı ekledik
-                        subject="Yeni Cari Açılışı",
-                        body="Muhasebe için yeni cari açılışı ekte gönderilmiştir.",
-                        file_path="yeni_cari.txt"
-                    )
-                    st.success("Müşteri eklendi ve e-posta ile muhasebeye gönderildi!")
-                except Exception as e:
-                    st.warning(f"Müşteri eklendi ama e-posta gönderilemedi: {e}")
-                st.rerun()
+                send_email_with_txt(
+                    to_email=["muhasebe@sekeroglugroup.com", "h.boy@sekeroglugroup.com"],
+                    subject="Yeni Cari Açılışı",
+                    body="Muhasebe için yeni cari açılışı ekte gönderilmiştir.",
+                    file_path="yeni_cari.txt"
+                )
+                st.success("Müşteri eklendi ve e-posta ile muhasebeye gönderildi!")
+            except Exception as e:
+                st.warning(f"Müşteri eklendi ama e-posta gönderilemedi: {e}")
 
+            # Kullanıcıya senkron özeti
+            if wrote_sheet:
+                st.toast("Google Sheets güncellendi.")
+            else:
+                st.toast("Sheets yazımı atlandı (quota/hata). Lokal dosya güncellendi.", icon="⚠️")
 
-
-                
+            st.rerun()
 
 ### ===========================
 ### === MÜŞTERİ LİSTESİ MENÜSÜ ===
@@ -765,6 +536,14 @@ if menu == "Cari Ekleme":
 
 import numpy as np  # Eksik bilgi mesajı için gerekli
 
+# Eğer önceki blokta tanımlı değilse, NameError olmaması için basit bir fallback tanımı
+try:
+    _write_customers_to_gsheet
+except NameError:
+    def _write_customers_to_gsheet(df_customers: pd.DataFrame) -> bool:
+        return False
+
+# Kolon güvenliği
 if "Vade (Gün)" not in df_musteri.columns:
     df_musteri["Vade (Gün)"] = ""
 if "Ülke" not in df_musteri.columns:
@@ -788,52 +567,87 @@ if menu == "Müşteri Listesi":
             st.dataframe(aktif_df, use_container_width=True)
 
         st.markdown("<h4 style='margin-top: 32px;'>Müşteri Düzenle</h4>", unsafe_allow_html=True)
+
         # Kombo box seçenekleri yine tüm müşterilerden, alfabetik
         df_musteri_sorted = df_musteri.sort_values("Müşteri Adı").reset_index(drop=True)
         musteri_options = df_musteri_sorted.index.tolist()
+
         sec_index = st.selectbox(
             "Düzenlenecek Müşteriyi Seçin",
             options=musteri_options,
             format_func=lambda i: f"{df_musteri_sorted.at[i,'Müşteri Adı']} ({df_musteri_sorted.at[i,'Kategori']})"
         )
+
         with st.form("edit_existing_customer"):
             name = st.text_input("Müşteri Adı", value=df_musteri_sorted.at[sec_index, "Müşteri Adı"])
             phone = st.text_input("Telefon", value=df_musteri_sorted.at[sec_index, "Telefon"])
             email = st.text_input("E-posta", value=df_musteri_sorted.at[sec_index, "E-posta"])
             address = st.text_area("Adres", value=df_musteri_sorted.at[sec_index, "Adres"])
-            ulke = st.selectbox("Ülke", ulke_listesi, index=ulke_listesi.index(df_musteri_sorted.at[sec_index, "Ülke"]) if df_musteri_sorted.at[sec_index, "Ülke"] in ulke_listesi else 0)
-            temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi, index=temsilci_listesi.index(df_musteri_sorted.at[sec_index, "Satış Temsilcisi"]) if df_musteri_sorted.at[sec_index, "Satış Temsilcisi"] in temsilci_listesi else 0)
-            kategori = st.selectbox(
-                "Kategori", 
-                sorted(["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"]), 
-                index=sorted(["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"]).index(df_musteri_sorted.at[sec_index, "Kategori"])
-                if df_musteri_sorted.at[sec_index, "Kategori"] in ["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"] else 0
+            ulke = st.selectbox(
+                "Ülke", ulke_listesi,
+                index=ulke_listesi.index(df_musteri_sorted.at[sec_index, "Ülke"])
+                      if df_musteri_sorted.at[sec_index, "Ülke"] in ulke_listesi else 0
             )
-            aktif_pasif = st.selectbox("Durum", ["Aktif", "Pasif"], index=0 if df_musteri_sorted.at[sec_index, "Durum"] == "Aktif" else 1)
+            temsilci = st.selectbox(
+                "Satış Temsilcisi", temsilci_listesi,
+                index=temsilci_listesi.index(df_musteri_sorted.at[sec_index, "Satış Temsilcisi"])
+                      if df_musteri_sorted.at[sec_index, "Satış Temsilcisi"] in temsilci_listesi else 0
+            )
+            kategori_sec = ["Avrupa bayi", "bayi", "müşteri", "yeni müşteri"]
+            kategori = st.selectbox(
+                "Kategori", sorted(kategori_sec),
+                index=sorted(kategori_sec).index(df_musteri_sorted.at[sec_index, "Kategori"])
+                      if df_musteri_sorted.at[sec_index, "Kategori"] in kategori_sec else 0
+            )
+            aktif_pasif = st.selectbox(
+                "Durum", ["Aktif", "Pasif"],
+                index=0 if df_musteri_sorted.at[sec_index, "Durum"] == "Aktif" else 1
+            )
             vade = st.text_input("Vade (Gün)", value=str(df_musteri_sorted.at[sec_index, "Vade (Gün)"]) if "Vade (Gün)" in df_musteri_sorted.columns else "")
-            odeme_sekli = st.selectbox("Ödeme Şekli", ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"], 
-                                       index=["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"].index(df_musteri_sorted.at[sec_index, "Ödeme Şekli"]) if df_musteri_sorted.at[sec_index, "Ödeme Şekli"] in ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"] else 0)
+            odeme_list = ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"]
+            odeme_sekli = st.selectbox(
+                "Ödeme Şekli", odeme_list,
+                index=odeme_list.index(df_musteri_sorted.at[sec_index, "Ödeme Şekli"])
+                      if df_musteri_sorted.at[sec_index, "Ödeme Şekli"] in odeme_list else 0
+            )
+
             guncelle = st.form_submit_button("Güncelle")
-            if guncelle:
-                # Eski indexi bulup güncelle (çünkü sorted kopyada çalışıyoruz)
-                filtre = (df_musteri["Müşteri Adı"] == df_musteri_sorted.at[sec_index, "Müşteri Adı"])
-                if filtre.any():
-                    orj_idx = df_musteri[filtre].index[0]
-                    df_musteri.at[orj_idx, "Müşteri Adı"] = name
-                    df_musteri.at[orj_idx, "Telefon"] = phone
-                    df_musteri.at[orj_idx, "E-posta"] = email
-                    df_musteri.at[orj_idx, "Adres"] = address
-                    df_musteri.at[orj_idx, "Ülke"] = ulke
-                    df_musteri.at[orj_idx, "Satış Temsilcisi"] = temsilci
-                    df_musteri.at[orj_idx, "Kategori"] = kategori
-                    df_musteri.at[orj_idx, "Durum"] = aktif_pasif
-                    df_musteri.at[orj_idx, "Vade (Gün)"] = vade
-                    df_musteri.at[orj_idx, "Ödeme Şekli"] = odeme_sekli
+
+        if guncelle:
+            # Eski indexi bulup güncelle (çünkü sorted kopyada çalışıyoruz)
+            filtre = (df_musteri["Müşteri Adı"] == df_musteri_sorted.at[sec_index, "Müşteri Adı"])
+            if filtre.any():
+                orj_idx = df_musteri[filtre].index[0]
+                df_musteri.at[orj_idx, "Müşteri Adı"] = name
+                df_musteri.at[orj_idx, "Telefon"] = phone
+                df_musteri.at[orj_idx, "E-posta"] = email
+                df_musteri.at[orj_idx, "Adres"] = address
+                df_musteri.at[orj_idx, "Ülke"] = ulke
+                df_musteri.at[orj_idx, "Satış Temsilcisi"] = temsilci
+                df_musteri.at[orj_idx, "Kategori"] = kategori
+                df_musteri.at[orj_idx, "Durum"] = aktif_pasif
+                df_musteri.at[orj_idx, "Vade (Gün)"] = vade
+                df_musteri.at[orj_idx, "Ödeme Şekli"] = odeme_sekli
+
+                # Önce Sheets'e yaz (429 için backoff'lu helper)
+                wrote_sheet = _write_customers_to_gsheet(df_musteri)
+
+                # Lokal dosyayı da güncelle (her durumda)
+                try:
                     update_excel()
-                    st.success("Müşteri bilgisi güncellendi!")
-                    st.rerun()
+                except Exception as e:
+                    st.warning(f"Yerel temp.xlsx güncellenemedi: {e}")
+
+                if wrote_sheet:
+                    st.toast("Google Sheets güncellendi.")
                 else:
-                    st.warning("Beklenmeyen hata: Kayıt bulunamadı.")
+                    st.toast("Sheets yazımı atlandı (quota/hata). Lokal dosya güncellendi.", icon="⚠️")
+
+                st.success("Müşteri bilgisi güncellendi!")
+                st.rerun()
+            else:
+                st.warning("Beklenmeyen hata: Kayıt bulunamadı.")
+
         # Silme butonu
         st.markdown("<h4 style='margin-top: 32px;'>Müşteri Sil</h4>", unsafe_allow_html=True)
         sil_btn = st.button("Seçili Müşteriyi Sil")
@@ -842,7 +656,21 @@ if menu == "Müşteri Listesi":
             if filtre.any():
                 orj_idx = df_musteri[filtre].index[0]
                 df_musteri = df_musteri.drop(orj_idx).reset_index(drop=True)
-                update_excel()
+
+                # Önce Sheets'e yaz
+                wrote_sheet = _write_customers_to_gsheet(df_musteri)
+
+                # Lokal dosyayı da güncelle
+                try:
+                    update_excel()
+                except Exception as e:
+                    st.warning(f"Yerel temp.xlsx güncellenemedi: {e}")
+
+                if wrote_sheet:
+                    st.toast("Google Sheets güncellendi.")
+                else:
+                    st.toast("Sheets yazımı atlandı (quota/hata). Lokal dosya güncellendi.", icon="⚠️")
+
                 st.success("Müşteri kaydı silindi!")
                 st.rerun()
             else:
@@ -850,10 +678,56 @@ if menu == "Müşteri Listesi":
     else:
         st.markdown("<div style='color:#b00020; font-weight:bold; font-size:1.2em;'>Henüz müşteri kaydı yok.</div>", unsafe_allow_html=True)
 
-
 ### ===========================
 ### === GÖRÜŞME / ARAMA / ZİYARET KAYITLARI MENÜSÜ ===
 ### ===========================
+
+# 429 için backoff’lu, sadece "Kayıtlar" sayfasını yazan yardımcı
+try:
+    _write_kayit_to_gsheet
+except NameError:
+    def _write_kayit_to_gsheet(df_kayit: pd.DataFrame) -> bool:
+        """SHEET_ID içindeki 'Kayıtlar' sayfasını komple yazar.
+        429 için basit exponential backoff uygular. Başarılıysa True."""
+        try:
+            get_gspread_client  # globalde var mı?
+            SHEET_ID            # globalde var mı?
+        except NameError:
+            return False
+
+        gc = get_gspread_client()
+        if gc is None:
+            return False
+
+        import time
+        try:
+            from gspread_dataframe import set_with_dataframe
+        except Exception:
+            # kütüphane yoksa sessizce atla (requirements’a eklenmeli)
+            return False
+
+        sh = gc.open_by_key(SHEET_ID)
+        try:
+            ws = sh.worksheet("Kayıtlar")
+        except Exception:
+            ws = sh.add_worksheet(title="Kayıtlar", rows=1000, cols=26)
+
+        # Basit backoff: 1s, 2s, 4s, 8s (maks 4 deneme)
+        wait = 1.0
+        for _ in range(4):
+            try:
+                ws.clear()
+                set_with_dataframe(ws, df_kayit if isinstance(df_kayit, pd.DataFrame) else pd.DataFrame())
+                return True
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg or "Quota exceeded" in msg or "quota" in msg.lower():
+                    time.sleep(wait)
+                    wait *= 2
+                    continue
+                # 429 dışı hata → bırak
+                break
+        return False
 
 elif menu == "Görüşme / Arama / Ziyaret Kayıtları":
     # --- Her menüye geçişte dataframe’leri tekrar yükle ---
@@ -901,7 +775,21 @@ elif menu == "Görüşme / Arama / Ziyaret Kayıtları":
                         "Açıklama": aciklama
                     }
                     df_kayit = pd.concat([df_kayit, pd.DataFrame([new_row])], ignore_index=True)
-                    update_excel()
+
+                    # Önce Sheets'e yazmayı dene (429 backoff’lu)
+                    wrote_sheet = _write_kayit_to_gsheet(df_kayit)
+
+                    # Lokal temp.xlsx’i her durumda güncelle
+                    try:
+                        update_excel()
+                    except Exception as e:
+                        st.warning(f"Yerel temp.xlsx güncellenemedi: {e}")
+
+                    if wrote_sheet:
+                        st.toast("Google Sheets güncellendi.")
+                    else:
+                        st.toast("Sheets yazımı atlandı (quota/hata). Lokal dosya güncellendi.", icon="⚠️")
+
                     st.success("Kayıt eklendi!")
                     st.rerun()
 
@@ -946,6 +834,7 @@ elif menu == "Görüşme / Arama / Ziyaret Kayıtları":
 elif menu == "Fiyat Teklifleri":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Fiyat Teklifleri</h2>", unsafe_allow_html=True)
 
+    # Teklif No Otomatik Üretici
     def otomatik_teklif_no():
         if df_teklif.empty or "Teklif No" not in df_teklif.columns:
             return "TKF-0001"
@@ -957,6 +846,7 @@ elif menu == "Fiyat Teklifleri":
         yeni_no = max(mevcut_nolar) + 1
         return f"TKF-{yeni_no:04d}"
 
+    # Dosya güvenli silme fonksiyonu
     import time
     def güvenli_sil(dosya_adı, tekrar=5, bekle=1):
         for _ in range(tekrar):
@@ -967,20 +857,27 @@ elif menu == "Fiyat Teklifleri":
                 time.sleep(bekle)
         return False
 
+    # Açık teklifleri göster
     st.subheader("Açık Pozisyondaki Teklifler Listesi")
     teklif_goster = df_teklif.copy()
-    teklif_goster["Tarih"] = pd.to_datetime(teklif_goster["Tarih"]).dt.strftime("%d/%m/%Y")
+    if "Tarih" in teklif_goster.columns:
+        teklif_goster["Tarih"] = pd.to_datetime(teklif_goster["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
     acik_teklifler = teklif_goster[teklif_goster["Durum"] == "Açık"].sort_values(by=["Müşteri Adı", "Teklif No"])
     acik_teklif_sayi = len(acik_teklifler)
     try:
         toplam_teklif = pd.to_numeric(acik_teklifler["Tutar"], errors="coerce").sum()
     except Exception:
         toplam_teklif = 0
-    st.markdown(f"<div style='font-size:1.1em; color:#11998e; font-weight:bold;'>Toplam: {toplam_teklif:,.2f} $ | Toplam Açık Teklif: {acik_teklif_sayi} adet</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='font-size:1.1em; color:#11998e; font-weight:bold;'>"
+        f"Toplam: {toplam_teklif:,.2f} $ | Toplam Açık Teklif: {acik_teklif_sayi} adet</div>",
+        unsafe_allow_html=True
+    )
     st.dataframe(acik_teklifler[[
         "Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama"
     ]], use_container_width=True)
 
+    # İşlem seçimi
     st.markdown("##### Lütfen bir işlem seçin")
     col1, col2 = st.columns(2)
     with col1:
@@ -995,7 +892,7 @@ elif menu == "Fiyat Teklifleri":
     if eski_teklif_buton:
         st.session_state['teklif_view'] = "eski"
 
-    # --- YENİ TEKLİF EKLEME FORMU ---
+    # === YENİ TEKLİF EKLEME ===
     if st.session_state['teklif_view'] == "yeni":
         musteri_list = [""] + sorted(df_musteri["Müşteri Adı"].dropna().unique().tolist())
         st.subheader("Yeni Teklif Ekle")
@@ -1016,6 +913,7 @@ elif menu == "Fiyat Teklifleri":
                 elif not musteri_sec:
                     st.error("Lütfen müşteri seçiniz!")
                 else:
+                    # PDF varsa Drive'a yükle
                     if pdf_file:
                         temiz_musteri = "".join(x if x.isalnum() else "_" for x in str(musteri_sec))
                         temiz_tarih = str(tarih).replace("-", "")
@@ -1028,6 +926,7 @@ elif menu == "Fiyat Teklifleri":
                         gfile.Upload()
                         pdf_link = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
                         güvenli_sil(temp_path)
+                    # Yeni satır ekle
                     new_row = {
                         "Müşteri Adı": musteri_sec,
                         "Tarih": tarih,
@@ -1041,39 +940,29 @@ elif menu == "Fiyat Teklifleri":
                     df_teklif = pd.concat([df_teklif, pd.DataFrame([new_row])], ignore_index=True)
                     update_excel()
                     st.success("Teklif eklendi!")
-                    st.session_state['teklif_view'] = None  # formu kapat
+                    st.session_state['teklif_view'] = None
                     st.rerun()
 
-    # --- ESKİ TEKLİFLER: PROFORMA BENZERİ SEÇİMLİ ---
+    # === ESKİ TEKLİFLER ===
     if st.session_state['teklif_view'] == "eski":
         st.subheader("Eski Teklifler Listesi")
-
-        # Müşteri seç
-        eski_teklif_musteriler = df_teklif["Müşteri Adı"].dropna().unique().tolist()
-        eski_teklif_musteriler = [""] + sorted(eski_teklif_musteriler)
+        eski_teklif_musteriler = [""] + sorted(df_teklif["Müşteri Adı"].dropna().unique().tolist())
         secili_musteri = st.selectbox("Müşteri Seçiniz", eski_teklif_musteriler, key="eski_teklif_musteri_sec")
-
         if secili_musteri:
-            # Seçilen müşterinin teklifleri
             teklifler_bu_musteri = df_teklif[df_teklif["Müşteri Adı"] == secili_musteri].sort_values(by="Tarih", ascending=False)
             if teklifler_bu_musteri.empty:
                 st.info("Bu müşteriye ait teklif kaydı yok.")
             else:
-                # Teklifler arasında seçim için kombo
                 teklif_index = st.selectbox(
                     "Teklif Seçiniz",
                     teklifler_bu_musteri.index,
                     format_func=lambda i: f"{teklifler_bu_musteri.at[i, 'Teklif No']} | {teklifler_bu_musteri.at[i, 'Tarih']}"
                 )
                 secilen_teklif = teklifler_bu_musteri.loc[teklif_index]
-
-                # Teklif PDF varsa göster
                 if secilen_teklif["PDF"]:
                     st.markdown(f"**Teklif PDF:** [{secilen_teklif['Teklif No']}]({secilen_teklif['PDF']})", unsafe_allow_html=True)
                 else:
                     st.info("PDF bulunamadı.")
-
-                # Tüm detayları göster
                 st.write("**Teklif Detayları:**")
                 st.table({
                     "Müşteri Adı": [secilen_teklif["Müşteri Adı"]],
@@ -1085,7 +974,6 @@ elif menu == "Fiyat Teklifleri":
                     "Durum": [secilen_teklif["Durum"]],
                 })
 
-
 ### ===========================
 ### --- PROFORMA TAKİBİ MENÜSÜ ---
 ### ===========================
@@ -1093,8 +981,39 @@ elif menu == "Fiyat Teklifleri":
 elif menu == "Proforma Takibi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Proforma Takibi</h2>", unsafe_allow_html=True)
 
-    # Eksik sütunları kontrol et
-    for col in ["Vade (gün)", "Sipariş Formu", "Durum", "PDF", "Sevk Durumu", "Ülke", "Satış Temsilcisi", "Ödeme Şekli"]:
+    # ==== Yardımcılar: 429 throttling ile güvenli Drive upload ====
+    import time
+
+    def _throttled_upload(local_path: str, title: str, parent_id: str, max_retries: int = 4) -> str:
+        """
+        local_path dosyasını Google Drive'a yükler, link döndürür.
+        429 (quota) durumunda exponential backoff ile tekrar dener.
+        Başarısız olursa boş string döner.
+        """
+        for attempt in range(max_retries):
+            try:
+                meta = {'title': title, 'parents': [{'id': parent_id}]}
+                gfile = drive.CreateFile(meta)
+                gfile.SetContentFile(local_path)
+                # Shared Drive/Ortak sürücüler için destek param'ı
+                gfile.Upload(param={'supportsAllDrives': True})
+                return f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
+            except Exception as e:
+                msg = str(e)
+                # 429'a karşı bekleme
+                if "429" in msg or "Rate Limit" in msg or "quota" in msg.lower():
+                    wait = min(2 ** attempt, 8)  # 1,2,4,8 sn
+                    st.info(f"Yükleme limiti aşıldı, tekrar denenecek... ({attempt+1}/{max_retries})")
+                    time.sleep(wait)
+                    continue
+                else:
+                    st.warning(f"Dosya yüklenemedi: {e}")
+                    break
+        return ""
+
+    # ==== Eksik sütunları güvene al ====
+    for col in ["Vade (gün)", "Sipariş Formu", "Durum", "PDF", "Sevk Durumu",
+                "Ülke", "Satış Temsilcisi", "Ödeme Şekli"]:
         if col not in df_proforma.columns:
             df_proforma[col] = ""
 
@@ -1114,11 +1033,12 @@ elif menu == "Proforma Takibi":
         if isinstance(x, str) and x.strip() != ""
     ]) if not df_musteri.empty else []
     musteri_sec = st.selectbox("Müşteri Seç", [""] + musteri_list)
-    
+
     if musteri_sec:
         st.write("Proforma işlemi seçin:")
         islem = st.radio("", ["Yeni Kayıt", "Eski Kayıt"], horizontal=True)
-        
+
+        # ---------- YENİ KAYIT ----------
         if islem == "Yeni Kayıt":
             musteri_info = df_musteri[df_musteri["Müşteri Adı"] == musteri_sec]
             default_ulke = musteri_info["Ülke"].values[0] if not musteri_info.empty else ""
@@ -1126,7 +1046,7 @@ elif menu == "Proforma Takibi":
             default_odeme = musteri_info["Ödeme Şekli"].values[0] if not musteri_info.empty else ""
 
             with st.form("add_proforma"):
-                tarih = st.date_input("Tarih", value=datetime.date.today())
+                tarih = st.date_input("Tarih", value=datetime.date.today(), format="DD/MM/YYYY")
                 proforma_no = st.text_input("Proforma No")
                 tutar = st.text_input("Tutar ($)")
                 vade_gun = st.text_input("Vade (gün)")
@@ -1138,22 +1058,23 @@ elif menu == "Proforma Takibi":
                 pdf_file = st.file_uploader("Proforma PDF", type="pdf")
                 submitted = st.form_submit_button("Kaydet")
                 pdf_link = ""
+
                 if submitted:
                     if not proforma_no.strip() or not vade_gun.strip():
                         st.error("Proforma No ve Vade (gün) boş olamaz!")
                     else:
+                        # PDF yüklendiyse Drive'a gönder (EVRAK_KLASOR_ID kullanılacak)
                         if pdf_file:
-                            pdf_filename = f"{musteri_sec}_{tarih}_{proforma_no}.pdf"
+                            pdf_filename = f"{musteri_sec}_{tarih}_{proforma_no}.pdf".replace(" ", "_")
                             temp_path = os.path.join(".", pdf_filename)
                             with open(temp_path, "wb") as f:
                                 f.write(pdf_file.read())
-                            gfile = drive.CreateFile({'title': pdf_filename, 'parents': [{'id': "17lPkdYcC4BdowLdCsiWxiq0H_6oVGXLs"}]})
-                            gfile.SetContentFile(temp_path)
-                            gfile.Upload()
-                            pdf_link = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
-                            try: os.remove(temp_path)
-                            except: pass
-                        # Sipariş Formu ve Siparişe Dönüştü ayrı formla ekleniyor!
+                            pdf_link = _throttled_upload(temp_path, pdf_filename, EVRAK_KLASOR_ID)
+                            try:
+                                os.remove(temp_path)
+                            except:
+                                pass
+                        # Kayıt ekle (Sipariş Formu boş başlar)
                         new_row = {
                             "Müşteri Adı": musteri_sec,
                             "Tarih": tarih,
@@ -1173,7 +1094,8 @@ elif menu == "Proforma Takibi":
                         update_excel()
                         st.success("Proforma eklendi!")
                         st.rerun()
-        
+
+        # ---------- ESKİ KAYIT ----------
         elif islem == "Eski Kayıt":
             eski_kayitlar = df_proforma[
                 (df_proforma["Müşteri Adı"] == musteri_sec) &
@@ -1197,12 +1119,12 @@ elif menu == "Proforma Takibi":
 
                 if sec_index is not None:
                     kayit = eski_kayitlar.loc[sec_index]
-                    if kayit["PDF"]:
+                    if kayit.get("PDF"):
                         st.markdown(f"**Proforma PDF:** [{kayit['Proforma No']}]({kayit['PDF']})", unsafe_allow_html=True)
 
-                    # Esas form sadece güncelleme ve silme için
+                    # — Temel güncelle/sil formu —
                     with st.form("edit_proforma"):
-                        tarih_ = st.date_input("Tarih", value=pd.to_datetime(kayit["Tarih"]).date())
+                        tarih_ = st.date_input("Tarih", value=pd.to_datetime(kayit["Tarih"]).date(), format="DD/MM/YYYY")
                         proforma_no_ = st.text_input("Proforma No", value=kayit["Proforma No"])
                         tutar_ = st.text_input("Tutar ($)", value=kayit["Tutar"])
                         vade_gun_ = st.text_input("Vade (gün)", value=str(kayit["Vade (gün)"]))
@@ -1216,7 +1138,7 @@ elif menu == "Proforma Takibi":
                         guncelle = st.form_submit_button("Güncelle")
                         sil = st.form_submit_button("Sil")
 
-                    # Siparişe Dönüştü ise ayrı form!
+                    # — "Siparişe Dönüştü" ise Sipariş Formu ayrı yüklenir —
                     if durum_ == "Siparişe Dönüştü":
                         st.info("Lütfen sipariş formunu yükleyin ve ardından 'Sipariş Formunu Kaydet' butonuna basın.")
                         with st.form(f"siparis_formu_upload_{sec_index}"):
@@ -1227,24 +1149,24 @@ elif menu == "Proforma Takibi":
                             if siparis_formu_file is None:
                                 st.error("Sipariş formu yüklemelisiniz.")
                             else:
-                                siparis_formu_fname = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-                                temp_path = os.path.join(".", siparis_formu_fname)
+                                sf_name = f"{musteri_sec}_{proforma_no_}_SiparisFormu_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf".replace(" ", "_")
+                                temp_path = os.path.join(".", sf_name)
                                 with open(temp_path, "wb") as f:
                                     f.write(siparis_formu_file.read())
-                                gfile = drive.CreateFile({'title': siparis_formu_fname, 'parents': [{'id': "1xeTdhOE1Cc6ohJsRzPVlCMMraBIXWO9w"}]})
-                                gfile.SetContentFile(temp_path)
-                                gfile.Upload()
-                                siparis_formu_url = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
-                                try: os.remove(temp_path)
-                                except: pass
+                                sf_url = _throttled_upload(temp_path, sf_name, EVRAK_KLASOR_ID)
+                                try:
+                                    os.remove(temp_path)
+                                except:
+                                    pass
+
                                 # Hem sipariş formu hem durum burada güncellenir!
-                                df_proforma.at[sec_index, "Sipariş Formu"] = siparis_formu_url
+                                df_proforma.at[sec_index, "Sipariş Formu"] = sf_url
                                 df_proforma.at[sec_index, "Durum"] = "Siparişe Dönüştü"
                                 update_excel()
                                 st.success("Sipariş formu kaydedildi ve durum güncellendi!")
                                 st.rerun()
 
-                    # Diğer alanlar için sadece güncelle!
+                    # — Diğer alanlar için sadece güncelle —
                     if guncelle:
                         df_proforma.at[sec_index, "Tarih"] = tarih_
                         df_proforma.at[sec_index, "Proforma No"] = proforma_no_
@@ -1265,35 +1187,32 @@ elif menu == "Proforma Takibi":
                 else:
                     st.warning("Lütfen bir proforma seçin.")
 
-
 ### ===========================
 ### --- GÜNCEL SİPARİŞ DURUMU ---
 ### ===========================
 
 elif menu == "Güncel Sipariş Durumu":
-    st.header("Güncel Sipariş Durumu")
+    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Güncel Sipariş Durumu</h2>", unsafe_allow_html=True)
 
-    if "Sevk Durumu" not in df_proforma.columns:
-        df_proforma["Sevk Durumu"] = ""
-    if "Termin Tarihi" not in df_proforma.columns:
-        df_proforma["Termin Tarihi"] = ""
+    # Eksik kolonları kontrol et
+    for col in ["Sevk Durumu", "Termin Tarihi", "Sipariş Formu", "Ülke", "Satış Temsilcisi", "Ödeme Şekli"]:
+        if col not in df_proforma.columns:
+            df_proforma[col] = ""
 
+    # Sadece Siparişe Dönüşen ve Sevkedilmemiş siparişler
     siparisler = df_proforma[
-        (df_proforma["Durum"] == "Siparişe Dönüştü") & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi", "Ulaşıldı"]))
+        (df_proforma["Durum"] == "Siparişe Dönüştü") &
+        (~df_proforma["Sevk Durumu"].isin(["Sevkedildi", "Ulaşıldı"]))
     ].copy()
 
-    for col in ["Termin Tarihi", "Sipariş Formu", "Ülke", "Satış Temsilcisi", "Ödeme Şekli"]:
-        if col not in siparisler.columns:
-            siparisler[col] = ""
-
-    # ---- Termin Tarihi Sıralaması ----
+    # Termin Tarihine göre sıralama
     siparisler["Termin Tarihi Order"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce")
     siparisler = siparisler.sort_values("Termin Tarihi Order", ascending=True)
 
     if siparisler.empty:
         st.info("Henüz sevk edilmeyi bekleyen sipariş yok.")
     else:
-        # Tarih formatlarını iyileştir
+        # Tarih formatlarını düzenle
         siparisler["Tarih"] = pd.to_datetime(siparisler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
         siparisler["Termin Tarihi"] = pd.to_datetime(siparisler["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
 
@@ -1301,31 +1220,32 @@ elif menu == "Güncel Sipariş Durumu":
         st.markdown("<h4 style='color:#219A41; font-weight:bold;'>Tüm Siparişe Dönüşenler</h4>", unsafe_allow_html=True)
         st.dataframe(tablo, use_container_width=True)
 
-        # Termin Tarihi Güncelleme
+        # Termin Tarihi Güncelle
         st.markdown("#### Termin Tarihi Güncelle")
         sec_index = st.selectbox(
             "Termin Tarihi Girilecek Siparişi Seçin",
             options=siparisler.index,
             format_func=lambda i: f"{siparisler.at[i,'Müşteri Adı']} - {siparisler.at[i,'Proforma No']}"
         )
-        mevcut_termin = df_proforma.at[sec_index, "Termin Tarihi"] if "Termin Tarihi" in df_proforma.columns else ""
+
+        mevcut_termin = df_proforma.at[sec_index, "Termin Tarihi"]
         try:
             default_termin = pd.to_datetime(mevcut_termin, errors="coerce")
             if pd.isnull(default_termin):
                 default_termin = datetime.date.today()
             else:
                 default_termin = default_termin.date()
-        except Exception:
+        except:
             default_termin = datetime.date.today()
 
         yeni_termin = st.date_input("Termin Tarihi", value=default_termin, key="termin_input")
         if st.button("Termin Tarihini Kaydet"):
             df_proforma.at[sec_index, "Termin Tarihi"] = yeni_termin
-            update_excel()
+            update_gsheet_df_proforma(df_proforma)  # 429'a uygun güncelleme
             st.success("Termin tarihi kaydedildi!")
             st.rerun()
 
-        # Sevk Etme Butonu
+        # Sipariş Sevk Et
         st.markdown("#### Sipariş Sevk Et")
         sevk_sec_index = st.selectbox(
             "Sevk Edilecek Siparişi Seçin",
@@ -1345,11 +1265,15 @@ elif menu == "Güncel Sipariş Durumu":
                     df_eta[col] = ""
             df_eta = pd.concat([df_eta, pd.DataFrame([yeni_eta])], ignore_index=True)
             df_proforma.at[sevk_sec_index, "Sevk Durumu"] = "Sevkedildi"
-            update_excel()
+
+            # Sheets güncellemeleri
+            update_gsheet_df_eta(df_eta)
+            update_gsheet_df_proforma(df_proforma)
+
             st.success("Sipariş sevkedildi ve ETA takibine gönderildi!")
             st.rerun()
 
-        # --- YENİ EKLENECEK: Siparişi Beklemeye Al (Geri Çağır) ---
+        # Siparişi Beklemeye Al (Geri Çağır)
         st.markdown("#### Siparişi Beklemeye Al (Geri Çağır)")
         geri_index = st.selectbox(
             "Beklemeye Alınacak Siparişi Seçin",
@@ -1361,35 +1285,37 @@ elif menu == "Güncel Sipariş Durumu":
             df_proforma.at[geri_index, "Durum"] = "Beklemede"
             df_proforma.at[geri_index, "Sevk Durumu"] = ""
             df_proforma.at[geri_index, "Termin Tarihi"] = ""
-            update_excel()
+            update_gsheet_df_proforma(df_proforma)
             st.success("Sipariş tekrar bekleyen proformalar listesine alındı!")
             st.rerun()
 
-        # Altında PDF bağlantıları ve toplam tutar
+        # PDF & Sipariş Formu linkleri
         st.markdown("#### Tıklanabilir Proforma ve Sipariş Formu Linkleri")
-        for i, row in siparisler.iterrows():
+        for _, row in siparisler.iterrows():
             links = []
-            if pd.notnull(row["PDF"]) and row["PDF"]:
+            if row["PDF"]:
                 links.append(f"[Proforma PDF: {row['Proforma No']}]({row['PDF']})")
-            if pd.notnull(row["Sipariş Formu"]) and row["Sipariş Formu"]:
+            if row["Sipariş Formu"]:
                 fname = f"{row['Müşteri Adı']}__{row['Proforma No']}__SiparisFormu"
                 links.append(f"[Sipariş Formu: {fname}]({row['Sipariş Formu']})")
             if links:
                 st.markdown(" - " + " | ".join(links), unsafe_allow_html=True)
 
+        # Toplam Bekleyen Sevk Tutarı
         try:
             toplam = pd.to_numeric(siparisler["Tutar"], errors="coerce").sum()
-        except Exception:
+        except:
             toplam = 0
         st.markdown(f"<div style='color:#219A41; font-weight:bold;'>*Toplam Bekleyen Sevk: {toplam:,.2f} $*</div>", unsafe_allow_html=True)
 
-### ===========================
-### --- FATURA & İHRACAT EVRAKLARI MENÜSÜ ---
-### ===========================
+# ===========================
+# --- FATURA & İHRACAT EVRAKLARI MENÜSÜ ---
+# ===========================
 
 elif menu == "Fatura & İhracat Evrakları":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Fatura & İhracat Evrakları</h2>", unsafe_allow_html=True)
 
+    # Sütun güvenliği
     for col in [
         "Proforma No", "Vade (gün)", "Vade Tarihi", "Ülke", "Satış Temsilcisi", "Ödeme Şekli",
         "Commercial Invoice", "Sağlık Sertifikası", "Packing List",
@@ -1399,21 +1325,47 @@ elif menu == "Fatura & İhracat Evrakları":
         if col not in df_evrak.columns:
             df_evrak[col] = "" if col != "Ödendi" else False
 
-    musteri_secenek = sorted(df_proforma["Müşteri Adı"].dropna().unique().tolist())
+    # Yardımcılar
+    import re, tempfile
+    def _safe_name(text, maxlen=120):
+        s = str(text or "").strip().replace(" ", "_")
+        s = re.sub(r'[\\/*?:"<>|]+', "_", s)
+        return s[:maxlen]
+
+    def _upload_to_drive_return_link(file_bytes: bytes, filename: str, parent_id: str) -> str:
+        """Tek dosyayı Drive'a yükler ve görüntüleme linkini döndürür."""
+        # Geçici dosya (küçük yazma, 429'dan kaçınmak için tek seferde)
+        suffix = os.path.splitext(filename)[1] or ".pdf"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fp:
+            fp.write(file_bytes)
+            temp_path = fp.name
+        try:
+            meta = {'title': filename, 'parents': [{'id': parent_id}]}
+            gfile = drive.CreateFile(meta)
+            gfile.SetContentFile(temp_path)
+            gfile.Upload(param={'supportsAllDrives': True})
+            return f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
+        finally:
+            try: os.remove(temp_path)
+            except: pass
+
+    # Müşteri / Proforma seçimleri
+    musteri_secenek = sorted(df_proforma["Müşteri Adı"].dropna().astype(str).unique().tolist())
     secilen_musteri = st.selectbox("Müşteri Seç", [""] + musteri_secenek)
     secilen_proformalar = df_proforma[df_proforma["Müşteri Adı"] == secilen_musteri] if secilen_musteri else pd.DataFrame()
-    proforma_no_sec = ""
-    if not secilen_proformalar.empty:
-        proforma_no_sec = st.selectbox("Proforma No Seç", [""] + secilen_proformalar["Proforma No"].astype(str).tolist())
-    else:
-        proforma_no_sec = st.selectbox("Proforma No Seç", [""])
 
+    proforma_no_sec = st.selectbox(
+        "Proforma No Seç",
+        [""] + (secilen_proformalar["Proforma No"].astype(str).tolist() if not secilen_proformalar.empty else [])
+    )
+
+    # Müşteri bilgileri (ülke/temsilci/ödeme)
     musteri_info = df_musteri[df_musteri["Müşteri Adı"] == secilen_musteri]
     ulke = musteri_info["Ülke"].values[0] if not musteri_info.empty else ""
     temsilci = musteri_info["Satış Temsilcisi"].values[0] if not musteri_info.empty else ""
     odeme = musteri_info["Ödeme Şekli"].values[0] if not musteri_info.empty else ""
 
-    # --- 1. Önceki evrakların linklerini çek ---
+    # Önceki evraklar (varsa link tut)
     onceki_evrak = df_evrak[
         (df_evrak["Müşteri Adı"] == secilen_musteri) &
         (df_evrak["Proforma No"] == proforma_no_sec)
@@ -1437,57 +1389,59 @@ elif menu == "Fatura & İhracat Evrakları":
         fatura_no = st.text_input("Fatura No")
         fatura_tarih = st.date_input("Fatura Tarihi", value=datetime.date.today())
         tutar = st.text_input("Fatura Tutarı ($)")
+
+        # Vade (gün) & Vade Tarihi (proformadan otomatik, sadece gösterim)
         vade_gun = ""
         vade_tarihi = ""
         if secilen_musteri and proforma_no_sec:
-            proforma_kayit = df_proforma[(df_proforma["Müşteri Adı"] == secilen_musteri) & (df_proforma["Proforma No"] == proforma_no_sec)]
-            if not proforma_kayit.empty:
-                vade_gun = proforma_kayit.iloc[0].get("Vade (gün)", "")
+            _pf = df_proforma[
+                (df_proforma["Müşteri Adı"] == secilen_musteri) &
+                (df_proforma["Proforma No"] == proforma_no_sec)
+            ]
+            if not _pf.empty:
+                vade_gun = str(_pf.iloc[0].get("Vade (gün)", "") or "")
                 try:
                     vade_gun_int = int(vade_gun)
                     vade_tarihi = fatura_tarih + datetime.timedelta(days=vade_gun_int)
-                except:
+                except Exception:
                     vade_tarihi = ""
+
         st.text_input("Vade (gün)", value=vade_gun, key="vade_gun", disabled=True)
         st.date_input("Vade Tarihi", value=vade_tarihi if vade_tarihi else fatura_tarih, key="vade_tarihi", disabled=True)
         st.text_input("Ülke", value=ulke, disabled=True)
         st.text_input("Satış Temsilcisi", value=temsilci, disabled=True)
         st.text_input("Ödeme Şekli", value=odeme, disabled=True)
-        
-        # --- 2. Evrak yükleme alanları ve eski dosya linkleri ---
+
+        # Evrak upload alanları + önceki linklerin gösterimi
         uploaded_files = {}
         for col, label in evrak_tipleri:
             uploaded_files[col] = st.file_uploader(label, type="pdf", key=f"{col}_upload")
             prev_url = onceki_evrak.iloc[0][col] if not onceki_evrak.empty else ""
             st.markdown(file_link_html(label, prev_url), unsafe_allow_html=True)
-        
+
         submitted = st.form_submit_button("Kaydet")
 
         if submitted:
-            if not fatura_no.strip() or not tutar.strip():
+            if not (secilen_musteri and proforma_no_sec):
+                st.error("Lütfen önce müşteri ve proforma seçiniz.")
+            elif not fatura_no.strip() or not tutar.strip():
                 st.error("Fatura No ve Tutar boş olamaz!")
             else:
-                # Dosya yükleme ve eski dosya kontrolü
+                # Yeni dosya yüklendiyse yükle; yoksa eski linki koru
                 file_urls = {}
+                timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
                 for col, label in evrak_tipleri:
-                    uploaded_file = uploaded_files[col]
-                    # Önce yeni dosya yüklendiyse Drive'a yükle, yoksa eski dosya linkini al
-                    if uploaded_file:
-                        file_name = f"{col}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-                        temp_path = os.path.join(".", file_name)
-                        with open(temp_path, "wb") as f:
-                            f.write(uploaded_file.read())
-                        gfile = drive.CreateFile({'title': file_name, 'parents': [{'id': "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"}]})
-                        gfile.SetContentFile(temp_path)
-                        gfile.Upload()
-                        file_urls[col] = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
-                        try:
-                            os.remove(temp_path)
-                        except:
-                            pass
+                    up = uploaded_files[col]
+                    if up is not None:
+                        # güvenli ve anlamlı dosya adı
+                        fname = _safe_name(f"{secilen_musteri}__{proforma_no_sec}__{col}__{timestamp}") + ".pdf"
+                        file_urls[col] = _upload_to_drive_return_link(
+                            up.read(), fname, EVRAK_KLASOR_ID
+                        )
                     else:
                         file_urls[col] = onceki_evrak.iloc[0][col] if not onceki_evrak.empty else ""
 
+                # Kayıt ekle
                 new_row = {
                     "Müşteri Adı": secilen_musteri,
                     "Proforma No": proforma_no_sec,
@@ -1504,12 +1458,14 @@ elif menu == "Fatura & İhracat Evrakları":
                     "Packing List": file_urls.get("Packing List", ""),
                     "Konşimento": file_urls.get("Konşimento", ""),
                     "İhracat Beyannamesi": file_urls.get("İhracat Beyannamesi", ""),
-                    "Fatura PDF": "",  # Gerekirse ekle
-                    "Sipariş Formu": "",
+                    "Fatura PDF": "",    # istersen ayrı yükleme alanı açılabilir
+                    "Sipariş Formu": "", # bu menüde dokunmuyoruz
                     "Yük Resimleri": "",
                     "EK Belgeler": "",
                     "Ödendi": False,
                 }
+
+                # Tek seferde yaz (429’dan kaçınmak için)
                 df_evrak = pd.concat([df_evrak, pd.DataFrame([new_row])], ignore_index=True)
                 update_excel()
                 st.success("Evrak eklendi!")
@@ -1522,9 +1478,21 @@ elif menu == "Fatura & İhracat Evrakları":
 elif menu == "Vade Takibi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Vade Takibi</h2>", unsafe_allow_html=True)
 
-    # ==== Drive ayarları (ANA klasörünüz) ====
-    import tempfile, re
-    ROOT_EXPORT_FOLDER_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"  # İhracat evrakları ana klasör ID
+    # ==== Güvenlik: Gerekli sütunların varlığı ====
+    for col in ["Proforma No", "Vade (gün)", "Vade Tarihi", "Ülke", "Satış Temsilcisi", "Ödeme Şekli",
+                "Fatura No", "Fatura Tarihi", "Tutar", "Ödeme Kanıtı", "Ödendi"]:
+        if col not in df_evrak.columns:
+            df_evrak[col] = "" if col != "Ödendi" else False
+
+    # Tip düzeltmeleri
+    df_evrak["Ödendi"] = df_evrak["Ödendi"].fillna(False).astype(bool)
+    df_evrak["Vade Tarihi"] = pd.to_datetime(df_evrak["Vade Tarihi"], errors="coerce")
+    df_evrak["Fatura Tarihi"] = pd.to_datetime(df_evrak["Fatura Tarihi"], errors="coerce")
+
+    # ==== Drive klasörleri (müşteri/kanıt) ====
+    import re, tempfile
+
+    ROOT_EXPORT_FOLDER_ID = EVRAK_KLASOR_ID  # Globalden geliyor
 
     def safe_name(text, maxlen=120):
         s = str(text or "").strip().replace(" ", "_")
@@ -1541,7 +1509,8 @@ elif menu == "Vade Takibi":
             lst = drive.ListFile({
                 'q': q, 'supportsAllDrives': True, 'includeItemsFromAllDrives': True
             }).GetList()
-            if lst: return lst[0]['id']
+            if lst:
+                return lst[0]['id']
             meta = {
                 'title': name,
                 'mimeType': 'application/vnd.google-apps.folder',
@@ -1557,34 +1526,24 @@ elif menu == "Vade Takibi":
     def get_or_create_customer_folder(customer_name: str, parent_folder_id: str) -> str:
         return get_or_create_folder_by_name(safe_name(customer_name, 100), parent_folder_id)
 
-    # ==== Sütun güvenliği ====
-    for col in ["Proforma No", "Vade (gün)", "Ödendi", "Ülke", "Satış Temsilcisi", "Ödeme Şekli",
-                "Vade Tarihi", "Fatura No", "Müşteri Adı", "Ödeme Kanıtı"]:
-        if col not in df_evrak.columns:
-            df_evrak[col] = "" if col not in ["Ödendi"] else False
-
-    df_evrak["Ödendi"] = df_evrak["Ödendi"].fillna(False).astype(bool)
-    df_evrak["Vade Tarihi"] = pd.to_datetime(df_evrak["Vade Tarihi"], errors="coerce")
-
+    # ==== Liste: yalnızca vadesi tanımlı ve ödenmemişler ====
     today = pd.to_datetime(datetime.date.today())
-
-    # Sadece ödenmemiş ve vadeli kayıtlar
     vade_df = df_evrak[df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])].reset_index()
 
     if vade_df.empty:
         st.info("Açık vade kaydı yok.")
     else:
-        # Her satır için bilgi + ödeme kanıtı yükleme + Ödendi checkbox
+        st.markdown("#### Açık Vade Kayıtları (kart görünümü)")
         for i, row in vade_df.iterrows():
             kalan = (row["Vade Tarihi"] - today).days
             mesaj = (
                 f"{row['Müşteri Adı']} | {row.get('Ülke','')} | {row.get('Satış Temsilcisi','')} "
-                f"| Proforma No: {row.get('Proforma No','')} | Fatura No: {row['Fatura No']} "
-                f"| Vade Tarihi: {row['Vade Tarihi'].date()} | Ödeme: {row.get('Ödeme Şekli','')}"
+                f"| Proforma: {row.get('Proforma No','')} | Fatura: {row.get('Fatura No','')} "
+                f"| Vade: {row['Vade Tarihi'].date()} | Ödeme Şekli: {row.get('Ödeme Şekli','')}"
             )
 
-            box = st.container(border=True)
-            with box:
+            kart = st.container(border=True)
+            with kart:
                 if kalan == 1:
                     st.error(f"{mesaj} | **YARIN VADE DOLUYOR!**")
                 elif kalan < 0:
@@ -1592,31 +1551,33 @@ elif menu == "Vade Takibi":
                 else:
                     st.info(f"{mesaj} | {kalan} gün kaldı.")
 
-                # Ödeme kanıtı uploader (çoklu format)
-                kanit_file = st.file_uploader(
+                # Önceden yüklenmiş link
+                onceki_link = row.get("Ödeme Kanıtı", "")
+                if onceki_link:
+                    st.markdown(f"[Önceden yüklenmiş ödeme kanıtı]({onceki_link})", unsafe_allow_html=True)
+
+                # Kanıt yükleme (çoklu format)
+                kanit = st.file_uploader(
                     "Ödeme Kanıtı (PDF/JPG/PNG/JPEG/WEBP)",
                     type=["pdf", "jpg", "jpeg", "png", "webp"],
                     key=f"kanit_{i}"
                 )
 
-                # Daha önce yüklenmiş link varsa göster
-                prev_link = row.get("Ödeme Kanıtı", "")
-                if prev_link:
-                    st.markdown(f"[Önceden yüklenmiş ödeme kanıtı]({prev_link})", unsafe_allow_html=True)
-
-                tick = st.checkbox(
-                    f"Ödendi olarak işaretle → {row['Müşteri Adı']} - Proforma No: {row.get('Proforma No','')} - Fatura No: {row['Fatura No']}",
+                # Ödendi işaretleme — not: sadece tıklandığında yazıyoruz (429 için minimum yazım)
+                tik = st.checkbox(
+                    f"Ödendi olarak işaretle → {row['Müşteri Adı']} - Proforma: {row.get('Proforma No','')} - Fatura: {row['Fatura No']}",
                     key=f"odendi_{i}"
                 )
 
-                if tick:
-                    # Kanıt zorunlu
-                    if kanit_file is None and not prev_link:
+                if tik:
+                    # Kanıt zorunlu (yeni ya da önceden var)
+                    if kanit is None and not onceki_link:
                         st.error("Lütfen önce **Ödeme Kanıtı** dosyası yükleyin (PDF/JPG/PNG…).")
                     else:
-                        # Eğer yeni dosya geldiyse Drive'a yükle
-                        odeme_kaniti_url = prev_link
-                        if kanit_file is not None:
+                        odeme_kaniti_url = onceki_link
+
+                        # Yeni kanıt yüklendiyse Drive'a at
+                        if kanit is not None:
                             if not ROOT_EXPORT_FOLDER_ID:
                                 st.error("Ana klasör ID tanımlı değil; yükleme iptal edildi.")
                                 st.stop()
@@ -1626,29 +1587,26 @@ elif menu == "Vade Takibi":
                                 st.error("Müşteri klasörü oluşturulamadı; yükleme iptal edildi.")
                                 st.stop()
 
-                            # Müşteri altında 'Odeme_Kanitlari' alt klasörü
                             kanit_folder_id = get_or_create_folder_by_name("Odeme_Kanitlari", cust_folder_id)
                             if not kanit_folder_id:
                                 st.error("Ödeme kanıtı klasörü oluşturulamadı; yükleme iptal edildi.")
                                 st.stop()
 
                             # Dosyayı geçici kaydet ve yükle
-                            suffix = os.path.splitext(kanit_file.name)[1].lower() or ".pdf"
+                            suffix = os.path.splitext(kanit.name)[1].lower() or ".pdf"
                             ts = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-                            fname = safe_name(f"OdemeKaniti__{row['Müşteri Adı']}__{row.get('Proforma No','')}__{row['Fatura No']}__{ts}") + suffix
+                            fname = safe_name(
+                                f"OdemeKaniti__{row['Müşteri Adı']}__{row.get('Proforma No','')}__{row['Fatura No']}__{ts}"
+                            ) + suffix
 
                             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fp:
-                                fp.write(kanit_file.read())
+                                fp.write(kanit.read())
                                 temp_path = fp.name
 
-                            meta = {
-                                'title': fname,
-                                'parents': [{'id': kanit_folder_id}],
-                            }
+                            meta = {'title': fname, 'parents': [{'id': kanit_folder_id}]}
                             gfile = drive.CreateFile(meta)
                             gfile.SetContentFile(temp_path)
                             try:
-                                # supportsAllDrives => Shared Drive desteği
                                 gfile.Upload(param={'supportsAllDrives': True})
                                 odeme_kaniti_url = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
                             except Exception as e:
@@ -1657,23 +1615,28 @@ elif menu == "Vade Takibi":
                                 try: os.remove(temp_path)
                                 except: pass
 
-                        # Kayıt güncelle: kanıt linki + Ödendi = True
+                        # === TEK NOKTA YAZIM (429 için) ===
                         df_evrak.at[row['index'], "Ödeme Kanıtı"] = odeme_kaniti_url
                         df_evrak.at[row['index'], "Ödendi"] = True
-                        update_excel()
+                        update_excel()  # sadece değişiklik olduğunda yaz
                         st.success("Kayıt 'Ödendi' olarak işaretlendi ve ödeme kanıtı kaydedildi.")
                         st.rerun()
 
-        st.markdown("#### Açık Vade Kayıtları")
+        # Alt kısımda tablo özeti
+        st.markdown("#### Açık Vade Kayıtları (tablo)")
+        tablo = df_evrak[
+            df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])
+        ].copy()
+
+        # Görsel formatlar
+        tablo["Fatura Tarihi"] = pd.to_datetime(tablo["Fatura Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+        tablo["Vade Tarihi"] = pd.to_datetime(tablo["Vade Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+
         st.dataframe(
-            df_evrak[
-                df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])
-            ][["Müşteri Adı", "Ülke", "Satış Temsilcisi", "Ödeme Şekli",
-               "Proforma No", "Fatura No", "Fatura Tarihi", "Vade (gün)", "Vade Tarihi", "Tutar"]],
+            tablo[["Müşteri Adı", "Ülke", "Satış Temsilcisi", "Ödeme Şekli",
+                   "Proforma No", "Fatura No", "Fatura Tarihi", "Vade (gün)", "Vade Tarihi", "Tutar"]],
             use_container_width=True
         )
-
-
 
 ### ===========================
 ### --- ETA TAKİBİ MENÜSÜ ---
@@ -1681,13 +1644,13 @@ elif menu == "Vade Takibi":
 elif menu == "ETA Takibi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ETA Takibi</h2>", unsafe_allow_html=True)
 
-    import re, tempfile
+    import re, tempfile, time
 
-    # ---- Sabitler ----
-    ROOT_EXPORT_FOLDER_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"  # İhracat Evrakları ana klasör ID
+    # ---- Sabitler (GLOBAL'den kullan) ----
+    ROOT_EXPORT_FOLDER_ID = EVRAK_KLASOR_ID  # İhracat Evrakları ana klasör ID'si
 
     # ---- Güvenlik: gerekli kolonlar ----
-    for col in ["Sevk Durumu", "Proforma No", "Sevk Tarihi", "Ulaşma Tarihi"]:
+    for col in ["Sevk Durumu", "Proforma No", "Sevk Tarihi", "Ulaşma Tarihi", "Termin Tarihi", "PDF", "Sipariş Formu"]:
         if col not in df_proforma.columns:
             df_proforma[col] = ""
 
@@ -1701,6 +1664,23 @@ elif menu == "ETA Takibi":
         s = re.sub(r'[\\/*?:"<>|]+', "_", s)
         return s[:maxlen]
 
+    def _drive_list(q: str):
+        """Drive listesinde 429/5xx hatalarında kısa bekleme ile 2 kez daha dene."""
+        tries = 3
+        last_err = None
+        for i in range(tries):
+            try:
+                return drive.ListFile({
+                    'q': q,
+                    'supportsAllDrives': True,
+                    'includeItemsFromAllDrives': True
+                }).GetList()
+            except Exception as e:
+                last_err = e
+                # Aşırı isteklerde (429) veya geçici hatalarda kısa bekleme
+                time.sleep(1.2 * (i + 1))
+        raise last_err
+
     def get_or_create_folder_by_name(name: str, parent_id: str) -> str:
         """Parent altında isme göre klasör bulur; yoksa oluşturur. Shared Drive uyumlu."""
         q = (
@@ -1708,9 +1688,7 @@ elif menu == "ETA Takibi":
             f"and '{parent_id}' in parents and trashed = false"
         )
         try:
-            lst = drive.ListFile({
-                'q': q, 'supportsAllDrives': True, 'includeItemsFromAllDrives': True
-            }).GetList()
+            lst = _drive_list(q)
             if lst:
                 return lst[0]['id']
             meta = {
@@ -1719,6 +1697,7 @@ elif menu == "ETA Takibi":
                 'parents': [{'id': parent_id}],
             }
             f = drive.CreateFile(meta)
+            # supportsAllDrives => Shared Drive desteği
             f.Upload(param={'supportsAllDrives': True})
             return f['id']
         except Exception as e:
@@ -1744,7 +1723,8 @@ elif menu == "ETA Takibi":
     else:
         # Seçim
         secenekler = sevkedilenler[["Müşteri Adı", "Proforma No"]].drop_duplicates()
-        secenekler["sec_text"] = secenekler["Müşteri Adı"] + " - " + secenekler["Proforma No"]
+        secenekler["sec_text"] = secenekler["Müşteri Adı"].astype(str) + " - " + sevkedilenler["Proforma No"].astype(str)
+        secenekler = secenekler.drop_duplicates("sec_text")
         selected = st.selectbox("Sevkedilen Sipariş Seç", secenekler["sec_text"])
         selected_row = secenekler[secenekler["sec_text"] == selected].iloc[0]
         sec_musteri = selected_row["Müşteri Adı"]
@@ -1770,13 +1750,11 @@ elif menu == "ETA Takibi":
                     unsafe_allow_html=True
                 )
 
-            # 3) Mevcut dosyaları say ve özetle (ilk 10 isim)
+            # 3) Mevcut dosyaları say ve özetle (ilk 10 isim) — tek liste çağrısı
             try:
-                mevcut_dosyalar = drive.ListFile({
-                    'q': f"'{hedef_klasor}' in parents and trashed = false",
-                    'supportsAllDrives': True,
-                    'includeItemsFromAllDrives': True
-                }).GetList()
+                mevcut_dosyalar = _drive_list(
+                    f"'{hedef_klasor}' in parents and trashed = false"
+                )
             except Exception as e:
                 mevcut_dosyalar = []
                 st.warning(f"Dosyalar listelenemedi: {e}")
@@ -1784,7 +1762,8 @@ elif menu == "ETA Takibi":
             if mevcut_dosyalar:
                 st.caption(f"Bu klasörde {len(mevcut_dosyalar)} dosya var.")
                 names = [f"- {f['title']}" for f in mevcut_dosyalar[:10]]
-                st.write("\n".join(names) if names else "")
+                if names:
+                    st.write("\n".join(names))
                 if len(mevcut_dosyalar) > 10:
                     st.write("…")
 
@@ -1829,10 +1808,11 @@ elif menu == "ETA Takibi":
                             except: pass
 
                     if yuklenen_say:
-                        update_excel()  # veri kaydımız yok ama genel dosya güncelleme için
+                        # Bu menüde veri eklemiyor olsak da tek çıkış noktası tutarlılık için:
+                        update_excel()
                         st.success(f"{yuklenen_say} yeni dosya yüklendi.")
                         if atlanan_duplike:
-                            st.info(f"{atlanan_duplike} dosya aynı isimle bulunduğu için atlandı.")
+                            st.info(f"{atlanan_duplike} dosya, aynı isimle bulunduğu için atlandı.")
                         st.rerun()
                     else:
                         if atlanan_duplike and not yuklenen_say:
@@ -1841,7 +1821,6 @@ elif menu == "ETA Takibi":
         st.markdown("---")
 
         # ========== ETA Düzenleme ==========
-        # Önceden ETA girilmiş mi?
         filtre = (df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma)
         if filtre.any():
             mevcut_eta = df_eta.loc[filtre, "ETA Tarihi"].values[0]
@@ -1852,51 +1831,56 @@ elif menu == "ETA Takibi":
 
         with st.form("edit_eta"):
             try:
-                varsayilan_eta = pd.to_datetime(mevcut_eta).date() if mevcut_eta and pd.notnull(mevcut_eta) and str(mevcut_eta) != "NaT" else datetime.date.today()
+                varsayilan_eta = pd.to_datetime(mevcut_eta, errors="coerce")
+                varsayilan_eta = varsayilan_eta.date() if pd.notnull(varsayilan_eta) else datetime.date.today()
             except Exception:
                 varsayilan_eta = datetime.date.today()
             eta_tarih = st.date_input("ETA Tarihi", value=varsayilan_eta)
             aciklama = st.text_area("Açıklama", value=mevcut_aciklama)
-            guncelle = st.form_submit_button("ETA'yı Kaydet/Güncelle")
-            ulasti = st.form_submit_button("Ulaştı")
-            geri_al = st.form_submit_button("Sevki Geri Al")
+            colA, colB, colC = st.columns(3)
+            with colA:
+                guncelle = st.form_submit_button("ETA'yı Kaydet/Güncelle")
+            with colB:
+                ulasti = st.form_submit_button("Ulaştı")
+            with colC:
+                geri_al = st.form_submit_button("Sevki Geri Al")
 
-            if guncelle:
-                if filtre.any():
-                    df_eta.loc[filtre, "ETA Tarihi"] = eta_tarih
-                    df_eta.loc[filtre, "Açıklama"] = aciklama
-                else:
-                    new_row = {
-                        "Müşteri Adı": sec_musteri,
-                        "Proforma No": sec_proforma,
-                        "ETA Tarihi": eta_tarih,
-                        "Açıklama": aciklama
-                    }
-                    df_eta = pd.concat([df_eta, pd.DataFrame([new_row])], ignore_index=True)
-                update_excel()
-                st.success("ETA kaydedildi/güncellendi!")
-                st.rerun()
+        if guncelle:
+            if filtre.any():
+                df_eta.loc[filtre, "ETA Tarihi"] = eta_tarih
+                df_eta.loc[filtre, "Açıklama"] = aciklama
+            else:
+                new_row = {
+                    "Müşteri Adı": sec_musteri,
+                    "Proforma No": sec_proforma,
+                    "ETA Tarihi": eta_tarih,
+                    "Açıklama": aciklama
+                }
+                df_eta = pd.concat([df_eta, pd.DataFrame([new_row])], ignore_index=True)
+            update_excel()
+            st.success("ETA kaydedildi/güncellendi!")
+            st.rerun()
 
-            if ulasti:
-                # Ulaşıldı: ETA listesinden çıkar, proforma'da Sevk Durumu "Ulaşıldı" ve bugünün tarihi "Ulaşma Tarihi" olarak kaydet
-                df_eta = df_eta[~((df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma))]
-                idx = df_proforma[(df_proforma["Müşteri Adı"] == sec_musteri) & (df_proforma["Proforma No"] == sec_proforma)].index
-                if len(idx) > 0:
-                    df_proforma.at[idx[0], "Sevk Durumu"] = "Ulaşıldı"
-                    df_proforma.at[idx[0], "Ulaşma Tarihi"] = datetime.date.today()
-                update_excel()
-                st.success("Sipariş 'Ulaşıldı' olarak işaretlendi ve ETA takibinden çıkarıldı!")
-                st.rerun()
+        if ulasti:
+            # Ulaşıldı: ETA listesinden çıkar, proforma'da Sevk Durumu "Ulaşıldı" ve bugünün tarihi "Ulaşma Tarihi" olarak kaydet
+            df_eta = df_eta[~((df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma))].reset_index(drop=True)
+            idx = df_proforma[(df_proforma["Müşteri Adı"] == sec_musteri) & (df_proforma["Proforma No"] == sec_proforma)].index
+            if len(idx) > 0:
+                df_proforma.at[idx[0], "Sevk Durumu"] = "Ulaşıldı"
+                df_proforma.at[idx[0], "Ulaşma Tarihi"] = datetime.date.today()
+            update_excel()
+            st.success("Sipariş 'Ulaşıldı' olarak işaretlendi ve ETA takibinden çıkarıldı!")
+            st.rerun()
 
-            if geri_al:
-                # Siparişi geri al: ETA'dan çıkar, proforma'da sevk durumunu boş yap (Güncel Sipariş Durumu'na döner)
-                df_eta = df_eta[~((df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma))]
-                idx = df_proforma[(df_proforma["Müşteri Adı"] == sec_musteri) & (df_proforma["Proforma No"] == sec_proforma)].index
-                if len(idx) > 0:
-                    df_proforma.at[idx[0], "Sevk Durumu"] = ""
-                update_excel()
-                st.success("Sevkiyat geri alındı! Sipariş tekrar Güncel Sipariş Durumu'na gönderildi.")
-                st.rerun()
+        if geri_al:
+            # Siparişi geri al: ETA'dan çıkar, proforma'da sevk durumunu boş yap (Güncel Sipariş Durumu'na döner)
+            df_eta = df_eta[~((df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma))].reset_index(drop=True)
+            idx = df_proforma[(df_proforma["Müşteri Adı"] == sec_musteri) & (df_proforma["Proforma No"] == sec_proforma)].index
+            if len(idx) > 0:
+                df_proforma.at[idx[0], "Sevk Durumu"] = ""
+            update_excel()
+            st.success("Sevkiyat geri alındı! Sipariş tekrar Güncel Sipariş Durumu'na gönderildi.")
+            st.rerun()
 
     # ==== ETA TAKİP LİSTESİ ====
     st.markdown("#### ETA Takip Listesi")
@@ -1913,13 +1897,17 @@ elif menu == "ETA Takibi":
 
         st.markdown("##### ETA Kaydı Sil")
         silinecekler = df_eta.index.tolist()
-        sil_sec = st.selectbox("Silinecek Kaydı Seçin", options=silinecekler,
-            format_func=lambda i: f"{df_eta.at[i, 'Müşteri Adı']} - {df_eta.at[i, 'Proforma No']}")
-        if st.button("KAYDI SİL"):
-            df_eta = df_eta.drop(sil_sec).reset_index(drop=True)
-            update_excel()
-            st.success("Seçilen ETA kaydı silindi!")
-            st.rerun()
+        if silinecekler:
+            sil_sec = st.selectbox(
+                "Silinecek Kaydı Seçin",
+                options=silinecekler,
+                format_func=lambda i: f"{df_eta.at[i, 'Müşteri Adı']} - {df_eta.at[i, 'Proforma No']}"
+            )
+            if st.button("KAYDI SİL"):
+                df_eta = df_eta.drop(sil_sec).reset_index(drop=True)
+                update_excel()
+                st.success("Seçilen ETA kaydı silindi!")
+                st.rerun()
     else:
         st.info("Henüz ETA kaydı yok.")
 
@@ -1927,23 +1915,24 @@ elif menu == "ETA Takibi":
     ulasanlar = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"].copy()
 
     if not ulasanlar.empty:
-        ulasanlar["sec_text"] = ulasanlar["Müşteri Adı"] + " - " + ulasanlar["Proforma No"]
+        ulasanlar["sec_text"] = ulasanlar["Müşteri Adı"].astype(str) + " - " + ulasanlar["Proforma No"].astype(str)
         st.markdown("#### Teslim Edilen Siparişlerde İşlemler")
         selected_ulasan = st.selectbox("Sipariş Seçiniz", ulasanlar["sec_text"])
         row = ulasanlar[ulasanlar["sec_text"] == selected_ulasan].iloc[0]
 
         # Ulaşma tarihi düzenleme
         try:
-            current_ulasma = pd.to_datetime(row.get("Ulaşma Tarihi", None)).date()
-            if pd.isnull(current_ulasma) or str(current_ulasma) == "NaT":
-                current_ulasma = datetime.date.today()
+            current_ulasma = pd.to_datetime(row.get("Ulaşma Tarihi", None), errors="coerce")
+            current_ulasma = current_ulasma.date() if pd.notnull(current_ulasma) else datetime.date.today()
         except Exception:
             current_ulasma = datetime.date.today()
 
         new_ulasma_tarih = st.date_input("Ulaşma Tarihi", value=current_ulasma, key="ulasan_guncelle")
         if st.button("Ulaşma Tarihini Kaydet"):
-            idx = df_proforma[(df_proforma["Müşteri Adı"] == row["Müşteri Adı"]) & 
-                              (df_proforma["Proforma No"] == row["Proforma No"])].index
+            idx = df_proforma[
+                (df_proforma["Müşteri Adı"] == row["Müşteri Adı"]) &
+                (df_proforma["Proforma No"] == row["Proforma No"])
+            ].index
             if len(idx) > 0:
                 df_proforma.at[idx[0], "Ulaşma Tarihi"] = new_ulasma_tarih
                 update_excel()
@@ -1989,32 +1978,31 @@ elif menu == "ETA Takibi":
             st.success("Sipariş, Ulaşanlar'dan geri alındı ve ETA listesine taşındı (Sevkedildi).")
             st.rerun()
 
-        # Ulaşanlar Tablosu
-        st.markdown("#### Ulaşan (Teslim Edilmiş) Siparişler")
+        # Ulaşanlar Tablosu (özet)
         if "Sevk Tarihi" in ulasanlar.columns:
             ulasanlar["Sevk Tarihi"] = pd.to_datetime(ulasanlar["Sevk Tarihi"], errors="coerce")
         else:
             ulasanlar["Sevk Tarihi"] = pd.NaT
+
         if "Termin Tarihi" in ulasanlar.columns:
             ulasanlar["Termin Tarihi"] = pd.to_datetime(ulasanlar["Termin Tarihi"], errors="coerce")
         else:
             ulasanlar["Termin Tarihi"] = pd.NaT
-        ulasanlar["Ulaşma Tarihi"] = pd.to_datetime(ulasanlar["Ulaşma Tarihi"], errors="coerce")
 
+        ulasanlar["Ulaşma Tarihi"] = pd.to_datetime(ulasanlar["Ulaşma Tarihi"], errors="coerce")
         ulasanlar["Gün Farkı"] = (ulasanlar["Ulaşma Tarihi"] - ulasanlar["Termin Tarihi"]).dt.days
+
         ulasanlar["Sevk Tarihi"] = ulasanlar["Sevk Tarihi"].dt.strftime("%d/%m/%Y")
         ulasanlar["Termin Tarihi"] = ulasanlar["Termin Tarihi"].dt.strftime("%d/%m/%Y")
         ulasanlar["Ulaşma Tarihi"] = ulasanlar["Ulaşma Tarihi"].dt.strftime("%d/%m/%Y")
 
-        tablo = ulasanlar[["Müşteri Adı", "Proforma No", "Termin Tarihi", "Sevk Tarihi", "Ulaşma Tarihi", "Gün Farkı", "Tutar", "Açıklama"]]
+        tablo = ulasanlar[[
+            "Müşteri Adı", "Proforma No", "Termin Tarihi", "Sevk Tarihi",
+            "Ulaşma Tarihi", "Gün Farkı", "Tutar", "Açıklama"
+        ]]
         st.dataframe(tablo, use_container_width=True)
     else:
         st.info("Henüz ulaşan sipariş yok.")
-
-
-
-
- 
 
 # ==============================
 # FUAR MÜŞTERİ KAYITLARI MENÜSÜ
@@ -2024,391 +2012,373 @@ if menu == "Fuar Müşteri Kayıtları":
     st.markdown("<h2 style='color:#8e54e9; font-weight:bold; text-align:center;'>🎫 FUAR MÜŞTERİ KAYITLARI</h2>", unsafe_allow_html=True)
     st.info("Fuarlarda müşteri görüşmelerinizi hızlıca buraya ekleyin. Hem yeni kayıt oluşturabilir hem de mevcut kayıtlarınızı düzenleyebilirsiniz.")
 
+    # --- Eksik kolon güvenliği ---
+    FUAR_COLS = ["Fuar Adı", "Müşteri Adı", "Ülke", "Telefon", "E-mail", "Satış Temsilcisi",
+                 "Açıklamalar", "Görüşme Kalitesi", "Tarih"]
+    for c in FUAR_COLS:
+        if c not in df_fuar_musteri.columns:
+            df_fuar_musteri[c] = "" if c not in ["Görüşme Kalitesi", "Tarih"] else (0 if c == "Görüşme Kalitesi" else "")
+
     # --- Fuar Adı Girişi & Seçimi ---
-    fuar_isimleri = list(df_fuar_musteri["Fuar Adı"].dropna().unique())
-    yeni_fuar = st.text_input("Yeni Fuar Adı Ekleyin (Eklemek istemiyorsanız boş bırakın):")
+    fuar_isimleri = sorted([x for x in df_fuar_musteri["Fuar Adı"].dropna().unique() if str(x).strip() != ""])
+    yeni_fuar = st.text_input("Yeni Fuar Adı Ekleyin (Eklemek istemiyorsanız boş bırakın):").strip()
+
     if yeni_fuar and yeni_fuar not in fuar_isimleri:
         fuar_isimleri.append(yeni_fuar)
-        fuar_adi = yeni_fuar
-    else:
-        fuar_adi = st.selectbox("Fuar Seçiniz", ["- Fuar Seçiniz -"] + sorted(fuar_isimleri), index=0)
-        if fuar_adi == "- Fuar Seçiniz -":
-            fuar_adi = ""
 
-    secim = st.radio("İşlem Seçiniz:", ["Yeni Kayıt", "Eski Kayıt"])
+    fuar_adi = st.selectbox("Fuar Seçiniz", ["- Fuar Seçiniz -"] + fuar_isimleri, index=0)
+    fuar_adi = "" if fuar_adi == "- Fuar Seçiniz -" else fuar_adi
+    if yeni_fuar:
+        fuar_adi = yeni_fuar  # öncelik yeni girilene
 
-    # Ülke ve Satış Temsilcisi Listeleri
-    ulke_listesi = sorted([
-    "Afganistan", "Almanya", "Amerika Birleşik Devletleri", "Andorra", "Angola", "Antigua ve Barbuda", "Arjantin",
-    "Arnavutluk", "Avustralya", "Avusturya", "Azerbaycan", "Bahamalar", "Bahreyn", "Bangladeş", "Barbados", "Belçika",
-    "Belize", "Benin", "Beyaz Rusya", "Bhutan", "Birleşik Arap Emirlikleri", "Birleşik Krallık", "Bolivya",
-    "Bosna-Hersek", "Botsvana", "Brezilya", "Brunei", "Bulgaristan", "Burkina Faso", "Burundi", "Butan",
-    "Cezayir", "Çad", "Çekya", "Çin", "Danimarka", "Doğu Timor", "Dominik Cumhuriyeti", "Dominika", "Ekvador",
-    "Ekvator Ginesi", "El Salvador", "Endonezya", "Eritre", "Ermenistan", "Estonya", "Etiyopya", "Fas",
-    "Fiji", "Fildişi Sahili", "Filipinler", "Filistin", "Finlandiya", "Fransa", "Gabon", "Gambia",
-    "Gana", "Gine", "Gine-Bissau", "Grenada", "Guatemala", "Guyana", "Güney Afrika", "Güney Kore",
-    "Güney Sudan", "Gürcistan", "Haiti", "Hindistan", "Hırvatistan", "Hollanda", "Honduras", "Hong Kong",
-    "Irak", "İran", "İrlanda", "İspanya", "İsrail", "İsveç", "İsviçre", "İtalya", "İzlanda", "Jamaika",
-    "Japonya", "Kamboçya", "Kamerun", "Kanada", "Karadağ", "Katar", "Kazakistan", "Kenya", "Kırgızistan",
-    "Kiribati", "Kolombiya", "Komorlar", "Kongo", "Kongo Demokratik Cumhuriyeti", "Kostarika", "Küba",
-    "Kuveyt", "Kuzey Kore", "Kuzey Makedonya", "Laos", "Lesotho", "Letonya", "Liberya", "Libya",
-    "Liechtenstein", "Litvanya", "Lübnan", "Lüksemburg", "Macaristan", "Madagaskar", "Malavi", "Maldivler",
-    "Malezya", "Mali", "Malta", "Marshall Adaları", "Meksika", "Mısır", "Mikronezya", "Moğolistan", "Moldova",
-    "Monako", "Morityus", "Mozambik", "Myanmar", "Namibya", "Nauru", "Nepal", "Nijer", "Nijerya",
-    "Nikaragua", "Norveç", "Orta Afrika Cumhuriyeti", "Özbekistan", "Pakistan", "Palau", "Panama", "Papua Yeni Gine",
-    "Paraguay", "Peru", "Polonya", "Portekiz", "Romanya", "Ruanda", "Rusya", "Saint Kitts ve Nevis",
-    "Saint Lucia", "Saint Vincent ve Grenadinler", "Samoa", "San Marino", "Sao Tome ve Principe", "Senegal",
-    "Seyşeller", "Sırbistan", "Sierra Leone", "Singapur", "Slovakya", "Slovenya", "Solomon Adaları", "Somali",
-    "Sri Lanka", "Sudan", "Surinam", "Suriye", "Suudi Arabistan", "Svaziland", "Şili", "Tacikistan", "Tanzanya",
-    "Tayland", "Tayvan", "Togo", "Tonga", "Trinidad ve Tobago", "Tunus", "Tuvalu", "Türkiye", "Türkmenistan",
-    "Uganda", "Ukrayna", "Umman", "Uruguay", "Ürdün", "Vanuatu", "Vatikan", "Venezuela", "Vietnam",
-    "Yemen", "Yeni Zelanda", "Yunanistan", "Zambiya", "Zimbabve"
-]) + ["Diğer"]
-
-    temsilci_listesi = ["Hüseyin POLAT", "Kemal İlker Çelikkalkan", "Efe Yıldırım"]
+    secim = st.radio("İşlem Seçiniz:", ["Yeni Kayıt", "Eski Kayıt"], horizontal=True)
 
     # --- YENİ KAYIT ---
     if secim == "Yeni Kayıt":
         st.markdown("#### Yeni Fuar Müşteri Kaydı Ekle")
         with st.form("fuar_musteri_ekle"):
-            musteri_adi = st.text_input("Müşteri Adı")
-            ulke = st.selectbox("Ülke Seçin", ulke_listesi)  # Ülke Seçimi
+            musteri_adi = st.text_input("Müşteri Adı").strip()
+            ulke = st.selectbox("Ülke Seçin", ulke_listesi)  # global listeden
             tel = st.text_input("Telefon")
             email = st.text_input("E-mail")
-            temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi)  # Satış Temsilcisi Seçimi
+            temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi)  # global listeden
             aciklama = st.text_area("Açıklamalar")
             gorusme_kalitesi = st.slider("Görüşme Kalitesi (1=Kötü, 5=Çok İyi)", 1, 5, 3)
-            tarih = st.date_input("Tarih", value=datetime.date.today())
+            tarih = st.date_input("Tarih", value=datetime.date.today(), format="DD/MM/YYYY")
             submitted = st.form_submit_button("Kaydet")
-            if submitted:
-                if not musteri_adi.strip() or not fuar_adi:
-                    st.warning("Lütfen fuar seçin ve müşteri adı girin.")
+
+        if submitted:
+            if not fuar_adi or not musteri_adi:
+                st.warning("Lütfen fuar seçin ve müşteri adı girin.")
+            else:
+                # Duplike önleme: Aynı Fuar + Müşteri varsa güncelle
+                mask = (df_fuar_musteri["Fuar Adı"] == fuar_adi) & (df_fuar_musteri["Müşteri Adı"] == musteri_adi)
+                new_vals = {
+                    "Fuar Adı": fuar_adi,
+                    "Müşteri Adı": musteri_adi,
+                    "Ülke": ulke,
+                    "Telefon": tel,
+                    "E-mail": email,
+                    "Satış Temsilcisi": temsilci,
+                    "Açıklamalar": aciklama,
+                    "Görüşme Kalitesi": int(gorusme_kalitesi),
+                    "Tarih": tarih
+                }
+                if mask.any():
+                    idx = df_fuar_musteri[mask].index[0]
+                    for k, v in new_vals.items():
+                        df_fuar_musteri.at[idx, k] = v
+                    update_excel()
+                    st.success("Mevcut kayıt güncellendi (duplike engellendi).")
                 else:
-                    new_row = {
-                        "Fuar Adı": fuar_adi,
-                        "Müşteri Adı": musteri_adi,
+                    df_fuar_musteri = pd.concat([df_fuar_musteri, pd.DataFrame([new_vals])], ignore_index=True)
+                    update_excel()
+                    st.success("Fuar müşterisi başarıyla eklendi!")
+                st.rerun()
+
+    # --- ESKİ KAYIT DÜZENLE/SİL ---
+    elif secim == "Eski Kayıt":
+        if not fuar_adi:
+            st.info("Lütfen önce bir fuar seçiniz.")
+        else:
+            kolonlar = ["Müşteri Adı", "Ülke", "Telefon", "E-mail", "Satış Temsilcisi", "Açıklamalar", "Görüşme Kalitesi", "Tarih"]
+            musteri_df = df_fuar_musteri[df_fuar_musteri["Fuar Adı"] == fuar_adi].copy()
+
+            if musteri_df.empty:
+                st.info("Bu fuara ait müşteri kaydı bulunamadı.")
+            else:
+                # Gösterim için tarih formatı
+                goster_df = musteri_df.copy()
+                goster_df["Tarih"] = pd.to_datetime(goster_df["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+
+                st.markdown(f"<h4 style='color:#4776e6;'>{fuar_adi} Fuarındaki Müşteri Görüşme Kayıtları</h4>", unsafe_allow_html=True)
+
+                # Seçim kutusu güvenli format_func
+                def _fmt(i):
+                    try:
+                        t = pd.to_datetime(musteri_df.at[i, "Tarih"], errors="coerce")
+                        t_str = t.strftime("%d/%m/%Y") if pd.notnull(t) else "-"
+                    except Exception:
+                        t_str = "-"
+                    return f"{musteri_df.at[i, 'Müşteri Adı']} ({t_str})"
+
+                secili_index = st.selectbox(
+                    "Düzenlemek/Silmek istediğiniz kaydı seçin:",
+                    musteri_df.index,
+                    format_func=_fmt
+                )
+
+                # Kayıt görüntüle & düzenle
+                with st.form("kayit_duzenle"):
+                    musteri_adi = st.text_input("Müşteri Adı", value=str(musteri_df.at[secili_index, "Müşteri Adı"]))
+                    # Ülke/Temsilci index güvenliği
+                    ulke_val = str(musteri_df.at[secili_index, "Ülke"])
+                    ulke_idx = ulke_listesi.index(ulke_val) if ulke_val in ulke_listesi else 0
+                    ulke = st.selectbox("Ülke", ulke_listesi, index=ulke_idx)
+
+                    tem_val = str(musteri_df.at[secili_index, "Satış Temsilcisi"])
+                    tem_idx = temsilci_listesi.index(tem_val) if tem_val in temsilci_listesi else 0
+                    temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi, index=tem_idx)
+
+                    tel = st.text_input("Telefon", value=str(musteri_df.at[secili_index, "Telefon"]))
+                    email = st.text_input("E-mail", value=str(musteri_df.at[secili_index, "E-mail"]))
+                    aciklama = st.text_area("Açıklamalar", value=str(musteri_df.at[secili_index, "Açıklamalar"]))
+                    try:
+                        gk_default = int(musteri_df.at[secili_index, "Görüşme Kalitesi"]) if str(musteri_df.at[secili_index, "Görüşme Kalitesi"]).strip() != "" else 3
+                    except Exception:
+                        gk_default = 3
+                    gorusme_kalitesi = st.slider("Görüşme Kalitesi (1=Kötü, 5=Çok İyi)", 1, 5, gk_default)
+
+                    try:
+                        tarih_def = pd.to_datetime(musteri_df.at[secili_index, "Tarih"], errors="coerce").date()
+                        if pd.isnull(tarih_def):
+                            tarih_def = datetime.date.today()
+                    except Exception:
+                        tarih_def = datetime.date.today()
+                    tarih = st.date_input("Tarih", value=tarih_def, format="DD/MM/YYYY")
+
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        guncelle = st.form_submit_button("Kaydı Güncelle")
+                    with col_b:
+                        sil = st.form_submit_button("Kaydı Sil")
+
+                if guncelle:
+                    # Güncelle
+                    updates = {
+                        "Müşteri Adı": musteri_adi.strip(),
                         "Ülke": ulke,
                         "Telefon": tel,
                         "E-mail": email,
                         "Satış Temsilcisi": temsilci,
                         "Açıklamalar": aciklama,
-                        "Görüşme Kalitesi": gorusme_kalitesi,
+                        "Görüşme Kalitesi": int(gorusme_kalitesi),
                         "Tarih": tarih
                     }
-                    df_fuar_musteri = pd.concat([df_fuar_musteri, pd.DataFrame([new_row])], ignore_index=True)
+                    for k, v in updates.items():
+                        df_fuar_musteri.at[secili_index, k] = v
                     update_excel()
-                    st.success("Fuar müşterisi başarıyla eklendi!")
+                    st.success("Kayıt güncellendi!")
                     st.rerun()
 
-    # --- ESKİ KAYIT DÜZENLE/SİL ---
-    elif secim == "Eski Kayıt":
-        kolonlar = ["Müşteri Adı", "Ülke", "Telefon", "E-mail", "Satış Temsilcisi", "Açıklamalar", "Görüşme Kalitesi", "Tarih"]
-        musteri_df = df_fuar_musteri[df_fuar_musteri["Fuar Adı"] == fuar_adi].copy()
-        if musteri_df.empty:
-            st.info("Bu fuara ait müşteri kaydı bulunamadı.")
-        else:
-            st.markdown(f"<h4 style='color:#4776e6;'>{fuar_adi} Fuarındaki Müşteri Görüşme Kayıtları</h4>", unsafe_allow_html=True)
-            secili_index = st.selectbox(
-                "Düzenlemek/Silmek istediğiniz kaydı seçin:",
-                musteri_df.index,
-                format_func=lambda i: f"{musteri_df.at[i, 'Müşteri Adı']} ({musteri_df.at[i, 'Tarih']})"
-            )
-            # Kayıt görüntüle & düzenle
-            with st.form("kayit_duzenle"):
-                musteri_adi = st.text_input("Müşteri Adı", value=musteri_df.at[secili_index, "Müşteri Adı"])
-                ulke = st.selectbox("Ülke", ulke_listesi, index=ulke_listesi.index(musteri_df.at[secili_index, "Ülke"]))
-                temsilci = st.selectbox("Satış Temsilcisi", temsilci_listesi, index=temsilci_listesi.index(musteri_df.at[secili_index, "Satış Temsilcisi"]))
-                tel = st.text_input("Telefon", value=musteri_df.at[secili_index, "Telefon"])
-                email = st.text_input("E-mail", value=musteri_df.at[secili_index, "E-mail"])
-                aciklama = st.text_area("Açıklamalar", value=musteri_df.at[secili_index, "Açıklamalar"])
-                gorusme_kalitesi = st.slider(
-                    "Görüşme Kalitesi (1=Kötü, 5=Çok İyi)", 1, 5,
-                    int(musteri_df.at[secili_index, "Görüşme Kalitesi"]) if musteri_df.at[secili_index, "Görüşme Kalitesi"] else 3
-                )
-                tarih = st.date_input(
-                    "Tarih",
-                    value=pd.to_datetime(musteri_df.at[secili_index, "Tarih"]).date()
-                    if musteri_df.at[secili_index, "Tarih"] else datetime.date.today()
-                )
-                guncelle = st.form_submit_button("Kaydı Güncelle")
-                sil = st.form_submit_button("Kaydı Sil")
-            if guncelle:
-                for key, value in zip(kolonlar, [musteri_adi, ulke, tel, email, temsilci, aciklama, gorusme_kalitesi, tarih]):
-                    df_fuar_musteri.at[secili_index, key] = value
-                update_excel()
-                st.success("Kayıt güncellendi!")
-                st.rerun()
-            if sil:
-                df_fuar_musteri = df_fuar_musteri.drop(secili_index).reset_index(drop=True)
-                update_excel()
-                st.success("Kayıt silindi!")
-                st.rerun()
-            st.dataframe(musteri_df[kolonlar], use_container_width=True)
+                if sil:
+                    df_fuar_musteri = df_fuar_musteri.drop(secili_index).reset_index(drop=True)
+                    update_excel()
+                    st.success("Kayıt silindi!")
+                    st.rerun()
 
+                st.dataframe(goster_df[kolonlar], use_container_width=True)
 
 # ===========================
-# === MEDYA ÇEKMECESİ MENÜSÜ ===
+# --- SATIŞ PERFORMANSI MENÜSÜ ---
 # ===========================
-
-elif menu == "Medya Çekmecesi":
-    st.markdown("<h2 style='color:#8e54e9; font-weight:bold;'>Medya Çekmecesi</h2>", unsafe_allow_html=True)
-    st.info("Google Drive’daki medya, ürün görselleri ve kalite evraklarına aşağıdaki sekmelerden ulaşabilirsiniz.")
-
-    # Klasör linkleri
-    drive_folders = {
-        "Genel Medya Klasörü": "https://drive.google.com/embeddedfolderview?id=1gFAaK-6v1e3346e-W0TsizOqSq43vHLY#list",
-        "Ürün Görselleri": "https://drive.google.com/embeddedfolderview?id=18NNlmadm5NNFkI1Amzt_YMwB53j6AmbD#list",
-        "Kalite Evrakları": "https://drive.google.com/embeddedfolderview?id=1pbArzYfA4Tp50zvdyTzSPF2ThrMWrGJc#list"
-    }
-
-    tab1, tab2, tab3 = st.tabs(list(drive_folders.keys()))
-
-    with tab1:
-        st.markdown(
-            f"""
-            <iframe src="{drive_folders['Genel Medya Klasörü']}" width="100%" height="600" frameborder="0" style="border:1px solid #eee; border-radius:12px; margin-top:10px;"></iframe>
-            """,
-            unsafe_allow_html=True
-        )
-        st.info("İlgili dosyanın üstüne çift tıklayarak yeni sekmede açabilir veya indirebilirsiniz.")
-
-    with tab2:
-        st.markdown(
-            f"""
-            <iframe src="{drive_folders['Ürün Görselleri']}" width="100%" height="600" frameborder="0" style="border:1px solid #eee; border-radius:12px; margin-top:10px;"></iframe>
-            """,
-            unsafe_allow_html=True
-        )
-        st.info("İlgili dosyanın üstüne çift tıklayarak yeni sekmede açabilir veya indirebilirsiniz.")
-
-    with tab3:
-        st.markdown(
-            f"""
-            <iframe src="{drive_folders['Kalite Evrakları']}" width="100%" height="600" frameborder="0" style="border:1px solid #eee; border-radius:12px; margin-top:10px;"></iframe>
-            """,
-            unsafe_allow_html=True
-        )
-        st.info("Kalite sertifikalarını ve ilgili dokümanları bu klasörden inceleyebilir ve indirebilirsiniz.")
-
-    st.warning("Not: Klasörlerin paylaşım ayarlarının 'Bağlantıya sahip olan herkes görüntüleyebilir' olduğundan emin olun.")
-
-
-
-### ===========================
-### --- SATIŞ PERFORMANSI MENÜSÜ ---
-### ===========================
 
 elif menu == "Satış Performansı":
-    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Satış Performansı</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color:#219A41; font-weight:bold; text-align:center;'>📈 SATIŞ PERFORMANSI</h2>", unsafe_allow_html=True)
+    st.info("Fatura ve satış tutarlarını tarih aralığına göre görüntüleyebilir ve toplamları hesaplayabilirsiniz.")
 
     # --- Akıllı sayı dönüştürücü ---
     def smart_to_num(x):
-        if pd.isna(x): return 0.0
+        if pd.isna(x):
+            return 0.0
         s = str(x).strip()
         for sym in ["USD", "$", "€", "EUR", "₺", "TL", "tl", "Tl"]:
             s = s.replace(sym, "")
         s = s.replace("\u00A0", "").replace(" ", "")
-        # 1) Doğrudan parse (US)
-        try: return float(s)
-        except: pass
+        # 1) US formatı
+        try:
+            return float(s)
+        except:
+            pass
         # 2) Avrupa formatı
         if "," in s:
-            try: return float(s.replace(".", "").replace(",", "."))
-            except: pass
+            try:
+                return float(s.replace(".", "").replace(",", "."))
+            except:
+                pass
         return 0.0
 
-    # ---- Kolon güvenliği ----
+    # --- Kolon kontrolü ---
     if "Tutar" not in df_evrak.columns:
         df_evrak["Tutar"] = 0
     date_col = "Fatura Tarihi" if "Fatura Tarihi" in df_evrak.columns else "Tarih"
     if date_col not in df_evrak.columns:
         df_evrak[date_col] = pd.NaT
 
-    # ---- Tip dönüşümleri ----
+    # --- Veri hazırlama ---
     df_evrak = df_evrak.copy()
     df_evrak["Tutar_num"] = df_evrak["Tutar"].apply(smart_to_num).fillna(0.0)
     df_evrak[date_col] = pd.to_datetime(df_evrak[date_col], errors="coerce")
-    df_evrak = df_evrak[df_evrak[date_col].notna()]  # geçersiz tarihleri at
+    df_evrak = df_evrak[df_evrak[date_col].notna()]  # geçersiz tarihleri çıkar
 
-    # ---- Toplamlar ----
+    if df_evrak.empty:
+        st.warning("📭 Kayıt bulunamadı.")
+        st.stop()
+
+    # --- Genel toplam ---
     toplam_fatura = float(df_evrak["Tutar_num"].sum())
     st.markdown(f"<div style='font-size:1.3em; color:#185a9d; font-weight:bold;'>💵 Toplam Fatura Tutarı: {toplam_fatura:,.2f} USD</div>", unsafe_allow_html=True)
 
-    # ---- Tarih aralığı filtresi (Timestamp ile) ----
-    min_ts = df_evrak[date_col].min()
-    max_ts = df_evrak[date_col].max()
-    d1, d2 = st.date_input("📅 Tarih Aralığı", value=(min_ts.date(), max_ts.date()))
+    # --- Tarih filtresi ---
+    min_ts = df_evrak[date_col].min().date()
+    max_ts = df_evrak[date_col].max().date()
+    d1, d2 = st.date_input("📅 Tarih Aralığı Seçin", value=(min_ts, max_ts), min_value=min_ts, max_value=max_ts)
 
-    start_ts = pd.to_datetime(d1)  # 00:00
-    end_ts   = pd.to_datetime(d2) + pd.Timedelta(days=1) - pd.Timedelta(milliseconds=1)  # gün sonu
+    start_ts = pd.to_datetime(d1)
+    end_ts   = pd.to_datetime(d2) + pd.Timedelta(days=1) - pd.Timedelta(milliseconds=1)
 
-    mask = df_evrak[date_col].between(start_ts, end_ts, inclusive="both")
-    df_range = df_evrak[mask]
+    df_range = df_evrak[df_evrak[date_col].between(start_ts, end_ts, inclusive="both")]
 
+    # --- Aralık toplamı ---
     aralik_toplam = float(df_range["Tutar_num"].sum())
     st.markdown(f"<div style='font-size:1.2em; color:#f7971e; font-weight:bold;'>📊 {d1} - {d2} Arası Toplam: {aralik_toplam:,.2f} USD</div>", unsafe_allow_html=True)
 
-    # ---- Detay tablo ----
+    # --- Detay tablo ---
     show_cols = ["Müşteri Adı", "Fatura No", date_col, "Tutar"]
     show_cols = [c for c in show_cols if c in df_range.columns]
+
     st.dataframe(df_range[show_cols].sort_values(by=date_col, ascending=False), use_container_width=True)
 
+# ===========================
+# --- ÖZET EKRAN (Vade herkese açık) ---
+# ===========================
 
-# =============================
-# === Google Sheets <-> Lokal Excel Senkron Yardımcıları ===
-# Kaynak gerçek: Google Sheets.
-# Lokal dosya: temp.xlsx (dış dünyada rahat düzenlemek için)
-# Davranış:
-# - Uygulama açılırken "auto sync" çalışır:
-#   - Hem secrets (sheet_id) hem temp.xlsx varsa:
-#       - Meta sayfasındaki "last_sheet_update" ile temp.xlsx mtime karşılaştırılır.
-#       - Hangisi daha yeni ise diğer tarafa yazılır.
-#   - Sadece sheet varsa: sheet -> temp.xlsx çekilir (lokalde güncel kopya oluşur).
-#   - Sadece temp.xlsx varsa ve sheet bağlanabiliyorsa: temp.xlsx -> sheet push yapılır.
-# - UI'da "Şimdi Senkronize Et" butonu ile manuel sync tetiklenebilir.
-# Not: Lokal senkron için secrets gereklidir (service account ile bağlanmak için).
-# =============================
+if menu == "Özet Ekran":
+    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>📊 Özet Ekran</h2>", unsafe_allow_html=True)
 
-import os
-import time
-import pandas as pd
-from typing import Dict, List, Tuple, Optional
-
-def _get_meta_ws():
-    """Meta sayfasını getirir; yoksa oluşturur."""
-    sh = open_main_sheet()
-    try:
-        ws = sh.worksheet("Meta")
-    except Exception:
-        ws = sh.add_worksheet(title="Meta", rows=10, cols=5)
-        ws.update("A1", [["key", "value"], ["last_sheet_update", str(time.time())]])
-    return ws
-
-def _get_last_sheet_update_ts() -> float:
-    ws = _get_meta_ws()
-    try:
-        vals = ws.get("A1:B10")
-        meta = {row[0]: row[1] for row in vals[1:] if len(row) >= 2}
-        return float(meta.get("last_sheet_update", "0"))
-    except Exception:
+    # --- Akıllı sayı dönüştürücü ---
+    def smart_to_num(x):
+        if pd.isna(x):
+            return 0.0
+        s = str(x).strip()
+        for sym in ["USD", "$", "€", "EUR", "₺", "TL", "tl", "Tl"]:
+            s = s.replace(sym, "")
+        s = s.replace("\u00A0", "").replace(" ", "")
+        try:
+            return float(s)  # US format
+        except:
+            pass
+        if "," in s:
+            try:
+                return float(s.replace(".", "").replace(",", "."))  # EU format
+            except:
+                pass
         return 0.0
 
-def _set_last_sheet_update_ts(ts: Optional[float] = None):
-    if ts is None:
-        ts = time.time()
-    ws = _get_meta_ws()
-    # "last_sheet_update" satırını bul ve güncelle
-    vals = ws.get("A1:B10")
-    found = False
-    for i, row in enumerate(vals[1:], start=2):  # 2. satırdan itibaren
-        if len(row) >= 1 and row[0] == "last_sheet_update":
-            ws.update_cell(i, 2, str(ts))
-            found = True
-            break
-    if not found:
-        ws.append_row(["last_sheet_update", str(ts)])
+    # ---------- df_evrak güvenliği + toplam fatura ----------
+    toplam_fatura_tutar = 0.0
+    if not df_evrak.empty and "Tutar" in df_evrak.columns:
+        _ev = df_evrak.copy()
+        _ev["Tutar_num"] = _ev["Tutar"].apply(smart_to_num).fillna(0.0)
+        toplam_fatura_tutar = float(_ev["Tutar_num"].sum())
 
-def _expected_sheets() -> List[str]:
-    # Uygulamada kullanılan sheet sayfaları
-    return ["Sayfa1", "Kayıtlar", "Teklifler", "Proformalar", "Evraklar", "ETA", "FuarMusteri"]
+    st.markdown(
+        f"<div style='font-size:1.4em; color:#B22222; font-weight:bold;'>💰 Toplam Fatura Tutarı: {toplam_fatura_tutar:,.2f} USD</div>",
+        unsafe_allow_html=True
+    )
 
-def _read_local_all(path: str = "temp.xlsx") -> Dict[str, pd.DataFrame]:
-    dfs = {}
-    if not os.path.exists(path):
-        return dfs
-    try:
-        for ws in _expected_sheets():
-            try:
-                dfs[ws] = pd.read_excel(path, sheet_name=ws)
-            except Exception:
-                dfs[ws] = pd.DataFrame()
-    except Exception:
-        pass
-    return dfs
+    st.markdown("---")
 
-def _read_sheet_all() -> Dict[str, pd.DataFrame]:
-    dfs = {}
-    for ws in _expected_sheets():
-        dfs[ws] = load_ws(ws)
-    return dfs
+    # ---------- VADE DURUMU ----------
+    for col in ["Vade Tarihi", "Ödendi", "Tutar"]:
+        if col not in df_evrak.columns:
+            df_evrak[col] = "" if col != "Ödendi" else False
 
-def _write_local_all(dfs: Dict[str, pd.DataFrame], path: str = "temp.xlsx"):
-    # Tüm sayfaları aynı dosyaya çoklu sheet olarak yaz
-    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
-        for name, df in dfs.items():
-            (df if isinstance(df, pd.DataFrame) else pd.DataFrame()).to_excel(writer, index=False, sheet_name=name)
+    vade_df_all = df_evrak.copy()
+    vade_df_all["Ödendi"] = vade_df_all["Ödendi"].fillna(False).astype(bool)
+    vade_df_all["Vade Tarihi"] = pd.to_datetime(vade_df_all["Vade Tarihi"], errors="coerce")
+    vade_df_all["Tutar_num"] = vade_df_all["Tutar"].apply(smart_to_num).fillna(0.0)
 
-def _write_sheet_all(dfs: Dict[str, pd.DataFrame]):
-    # Tüm sayfaları Google Sheets'e yaz (tam sayfa güncelleme)
-    # gspread-dataframe kullanımı:
-    try:
-        from gspread_dataframe import set_with_dataframe
-    except Exception:
-        st.error("gspread-dataframe kütüphanesi eksik. requirements.txt içine 'gspread-dataframe' ekleyin.")
-        st.stop()
+    today_norm = pd.Timestamp.today().normalize()
+    od_me = ~vade_df_all["Ödendi"]
 
-    sh = open_main_sheet()
+    m_gelmemis = (vade_df_all["Vade Tarihi"] > today_norm) & od_me
+    m_bugun = (vade_df_all["Vade Tarihi"].dt.date == today_norm.date()) & od_me
+    m_gecikmis = (vade_df_all["Vade Tarihi"] < today_norm) & od_me
 
-    # Eksik çalışma sayfalarını tamamla
-    existing_titles = [ws.title for ws in sh.worksheets()]
-    for title in _expected_sheets():
-        if title not in existing_titles:
-            sh.add_worksheet(title=title, rows=1000, cols=26)
+    sum_gelmemis = float(vade_df_all.loc[m_gelmemis, "Tutar_num"].sum())
+    sum_bugun = float(vade_df_all.loc[m_bugun, "Tutar_num"].sum())
+    sum_gecikmis = float(vade_df_all.loc[m_gecikmis, "Tutar_num"].sum())
 
-    for name, df in dfs.items():
-        ws = sh.worksheet(name)
-        # Sayfayı temizle ve baştan yaz
-        ws.clear()
-        set_with_dataframe(ws, (df if isinstance(df, pd.DataFrame) else pd.DataFrame()))
-    _set_last_sheet_update_ts(time.time())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("📅 Vadesi Gelmemiş", f"{sum_gelmemis:,.2f} USD", f"{int(m_gelmemis.sum())} Fatura")
+    c2.metric("⚠️ Bugün Vadesi Dolan", f"{sum_bugun:,.2f} USD", f"{int(m_bugun.sum())} Fatura")
+    c3.metric("⛔ Gecikmiş", f"{sum_gecikmis:,.2f} USD", f"{int(m_gecikmis.sum())} Fatura")
 
-def sync_local_and_sheet(auto: bool = True, path: str = "temp.xlsx") -> str:
-    """Lokal temp.xlsx ile Google Sheets arasında çift yönlü senkron.
-    Dönüş: yapılan işlem özeti (string)."""
-    gc = get_gspread_client()
-    sheet_ok = gc is not None
-    local_ok = os.path.exists(path)
+    acik_vadeler = vade_df_all[vade_df_all["Vade Tarihi"].notna() & (~vade_df_all["Ödendi"])].copy()
+    if not acik_vadeler.empty:
+        acik_vadeler["Kalan Gün"] = (acik_vadeler["Vade Tarihi"] - today_norm).dt.days
+        st.markdown("#### 💸 Açık Vade Kayıtları")
+        cols_show = ["Müşteri Adı", "Ülke", "Fatura No", "Vade Tarihi", "Tutar", "Kalan Gün"]
+        cols_show = [c for c in cols_show if c in acik_vadeler.columns]
+        if "Vade Tarihi" in cols_show:
+            acik_vadeler["Vade Tarihi"] = pd.to_datetime(acik_vadeler["Vade Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+        st.dataframe(acik_vadeler[cols_show].sort_values("Kalan Gün"), use_container_width=True)
+    else:
+        st.info("Açık vade kaydı yok.")
 
-    if not sheet_ok and not local_ok:
-        return "Ne Google Sheets'e bağlanabildim ne de temp.xlsx bulundu."
+    st.markdown("---")
 
-    if sheet_ok and local_ok:
-        local_ts = os.path.getmtime(path)
-        sheet_ts = _get_last_sheet_update_ts()
-        if local_ts > sheet_ts:
-            # Lokal daha yeni -> Sheet'i güncelle
-            dfs = _read_local_all(path)
-            _write_sheet_all(dfs)
-            return "Lokal (temp.xlsx) daha yeniydi → Google Sheets güncellendi."
-        elif sheet_ts > local_ts:
-            # Sheet daha yeni -> Lokali güncelle
-            dfs = _read_sheet_all()
-            _write_local_all(dfs, path)
-            # Dosya mtime'ı da yeni timestamp ile hizala
-            os.utime(path, (time.time(), sheet_ts))
-            return "Google Sheets daha yeniydi → Lokal temp.xlsx güncellendi."
+    # ---------- Bekleyen Teklifler ----------
+    st.markdown("### 💰 Bekleyen Teklifler")
+    bekleyen_teklifler = df_teklif[df_teklif.get("Durum") == "Açık"] if not df_teklif.empty else pd.DataFrame()
+    toplam_teklif = pd.to_numeric(bekleyen_teklifler.get("Tutar", pd.Series()), errors="coerce").sum()
+    st.markdown(f"<div style='font-size:1.1em; color:#11998e; font-weight:bold;'>Toplam: {toplam_teklif:,.2f} $</div>", unsafe_allow_html=True)
+    if bekleyen_teklifler.empty:
+        st.info("Bekleyen teklif yok.")
+    else:
+        st.dataframe(bekleyen_teklifler[[c for c in ["Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama"] if c in bekleyen_teklifler.columns]], use_container_width=True)
+
+    # ---------- Bekleyen Proformalar ----------
+    st.markdown("### 📄 Bekleyen Proformalar")
+    bekleyen_proformalar = df_proforma[df_proforma.get("Durum") == "Beklemede"] if not df_proforma.empty else pd.DataFrame()
+    toplam_proforma = pd.to_numeric(bekleyen_proformalar.get("Tutar", pd.Series()), errors="coerce").sum()
+    st.markdown(f"<div style='font-size:1.1em; color:#f7971e; font-weight:bold;'>Toplam: {toplam_proforma:,.2f} $</div>", unsafe_allow_html=True)
+    if bekleyen_proformalar.empty:
+        st.info("Bekleyen proforma yok.")
+    else:
+        st.dataframe(bekleyen_proformalar[[c for c in ["Müşteri Adı", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"] if c in bekleyen_proformalar.columns]], use_container_width=True)
+
+    # ---------- Sevk Bekleyen ----------
+    st.markdown("### 🚚 Siparişe Dönüşen (Sevk Bekleyen) Siparişler")
+    for col in ["Sevk Durumu", "Ülke", "Termin Tarihi"]:
+        if col not in df_proforma.columns:
+            df_proforma[col] = ""
+    sevk_bekleyenler = df_proforma[(df_proforma.get("Durum") == "Siparişe Dönüştü") & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi", "Ulaşıldı"]))] if not df_proforma.empty else pd.DataFrame()
+    toplam_siparis = pd.to_numeric(sevk_bekleyenler.get("Tutar", pd.Series()), errors="coerce").sum()
+    st.markdown(f"<div style='font-size:1.1em; color:#185a9d; font-weight:bold;'>Toplam: {toplam_siparis:,.2f} $</div>", unsafe_allow_html=True)
+    if sevk_bekleyenler.empty:
+        st.info("Sevk bekleyen sipariş yok.")
+    else:
+        disp = sevk_bekleyenler.copy()
+        disp["Tarih"] = pd.to_datetime(disp["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+        disp["Termin Tarihi"] = pd.to_datetime(disp["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
+        st.dataframe(disp[[c for c in ["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Termin Tarihi", "Tutar", "Vade (gün)", "Açıklama"] if c in disp.columns]], use_container_width=True)
+
+    # ---------- Yolda Olan ----------
+    st.markdown("### ⏳ Yolda Olan (ETA Takibi) Siparişler")
+    eta_yolda = df_proforma[df_proforma.get("Sevk Durumu") == "Sevkedildi"] if not df_proforma.empty else pd.DataFrame()
+    toplam_eta = pd.to_numeric(eta_yolda.get("Tutar", pd.Series()), errors="coerce").sum()
+    st.markdown(f"<div style='font-size:1.1em; color:#c471f5; font-weight:bold;'>Toplam: {toplam_eta:,.2f} $</div>", unsafe_allow_html=True)
+    if eta_yolda.empty:
+        st.info("Yolda olan (sevk edilmiş) sipariş yok.")
+    else:
+        eta_disp = eta_yolda.copy()
+        eta_disp["Tarih"] = pd.to_datetime(eta_disp["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+        st.dataframe(eta_disp[[c for c in ["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"] if c in eta_disp.columns]], use_container_width=True)
+
+    # ---------- Son Teslim Edilen ----------
+    st.markdown("### ✅ Son Teslim Edilen (Ulaşıldı) 5 Sipariş")
+    if "Sevk Durumu" in df_proforma.columns:
+        teslim_edilenler = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"].copy()
+        if not teslim_edilenler.empty:
+            teslim_edilenler = teslim_edilenler.sort_values(by="Tarih", ascending=False).head(5)
+            teslim_edilenler["Tarih"] = pd.to_datetime(teslim_edilenler["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
+            st.dataframe(teslim_edilenler[[c for c in ["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"] if c in teslim_edilenler.columns]], use_container_width=True)
         else:
-            return "Her iki taraf da güncel görünüyor. Değişiklik yapılmadı."
-    elif sheet_ok and not local_ok:
-        # Sadece Sheet var → Lokale indir
-        dfs = _read_sheet_all()
-        _write_local_all(dfs, path)
-        os.utime(path, (time.time(), _get_last_sheet_update_ts()))
-        return "Sadece Google Sheets erişilebilir → Lokal temp.xlsx oluşturuldu."
-    elif local_ok and not sheet_ok:
-        # Sadece lokal var → Sheet'e yazılamaz, bilgi ver
-        return "Sadece temp.xlsx mevcut; Google Sheets'e bağlanılamadı. secrets ayarlarını kontrol edin."
+            st.info("Teslim edilmiş sipariş yok.")
+    else:
+        st.info("Teslim edilmiş sipariş yok.")
 
-# Uygulama açılışında otomatik senkronizasyon
-try:
-    with st.spinner("Veriler senkronize ediliyor..."):
-        sync_message = sync_local_and_sheet(auto=True, path="temp.xlsx")
-    st.toast(sync_message)
-except Exception as _e:
-    st.warning(f"Senkron sırasında bir uyarı oluştu: {_e}")
-
-# UI: manuel senkronizasyon
-with st.expander("🔄 Senkronizasyon", expanded=False):
-    if st.button("Şimdi Senkronize Et"):
-        msg = sync_local_and_sheet(auto=False, path="temp.xlsx")
-        st.success(msg)
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.info("Detay işlemler için soldaki menülerden ilgili bölümlere geçebilirsiniz.")
