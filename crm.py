@@ -378,7 +378,6 @@ def inject_sidebar_css():
     st.sidebar.markdown(
         """
 <style>
-section[data-testid="stSidebar"] { padding-top: 0.5rem; }
 div[data-testid="stSidebar"] .stRadio > div { gap: 10px !important; }
 div[data-testid="stSidebar"] .stRadio label {
     border-radius: 12px;
