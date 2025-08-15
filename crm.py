@@ -23,8 +23,25 @@ from typing import Any, Dict, List, Optional, Tuple, Tuple
 import pandas as pd
 import pandas as _pd
 
+# === Lazy Google Drive init helpers ===
+@st.cache_resource(show_spinner=False)
+def get_drive_or_none():
+    """Return Drive client or None without raising UI warnings."""
+    try:
+        return get_drive()  # your Service Account-based function
+    except Exception:
+        return None
 
-SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
+def ensure_drive():
+    """Initialize Drive client on demand; returns None if unavailable."""
+    key = "__drive_client__"
+    if key not in st.session_state:
+        st.session_state[key] = get_drive_or_none()
+    return st.session_state[key]
+# === /Lazy helpers ===
+
+
+SHEET_ID, Union= "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 
 # =============================
 # === CRM ILKER: Revizyon 1 ===
@@ -134,7 +151,8 @@ try:
     _ = drive  # mevcutsa dokunma
 except NameError:
     try:
-        drive = get_drive_client()
+        # INIT REMOVED: lazy initialization will be used
+        # drive = get_drive()
     except Exception as e:
         st.warning("Google Drive istemcisi oluşturulamadı. st.secrets ayarlarınızı kontrol edin.")
         drive = None
@@ -279,7 +297,10 @@ def get_drive():
     return GoogleDrive(gauth)
 
 
-drive = get_drive()
+# INIT REMOVED: lazy initialization will be used
+
+
+# drive = get_drive()
 
 if not os.path.exists(LOGO_LOCAL_NAME):
     logo_file = drive.CreateFile({'id': LOGO_FILE_ID})
@@ -2420,3 +2441,22 @@ with st.expander("🔄 Senkronizasyon", expanded=False):
     if st.button("Şimdi Senkronize Et"):
         msg = sync_local_and_sheet(auto=False, path="temp.xlsx")
         st.success(msg)
+
+
+# === Conditional auto-sync (quiet) ===
+try:
+    _has_sheet_id = bool(st.secrets.get("app", {}).get("sheet_id", "")) or bool(globals().get("SHEET_ID", ""))
+except Exception:
+    _has_sheet_id = bool(globals().get("SHEET_ID", ""))
+
+if _has_sheet_id and "sync_local_and_sheet" in globals() and not st.session_state.get("__auto_sync_done__", False):
+    try:
+        with st.spinner("Veriler senkronize ediliyor..."):
+            msg = sync_local_and_sheet(auto=True, path="temp.xlsx")  # function should exist in your code
+        st.toast(str(msg))
+        st.session_state["__auto_sync_done__"] = True
+    except Exception:
+        # Quietly skip if not configured; avoid noisy warnings on login screen
+        pass
+# === /Conditional auto-sync ===
+
