@@ -1888,67 +1888,87 @@ elif menu == "Güncel Sipariş Durumu":
     # ================= Termin Tarihi Güncelle =================
 st.markdown("#### Termin Tarihi Güncelle")
 
-# ID'leri normalize et (tip=str, trim)
+# ID'leri normalize et
 df_proforma["ID"] = df_proforma["ID"].astype(str).str.strip()
-siparisler["ID"] = siparisler["ID"].astype(str).str.strip()
+siparisler["ID"]  = siparisler["ID"].astype(str).str.strip()
 
-# Selectbox: ID ile seç, ekranda müşteri - proforma göster
+# Selectbox için etiket ve anahtar haritaları
+id_to_label = {}
+id_to_keys  = {}  # fallback için (Müşteri Adı, Proforma No)
+for _, r in siparisler.iterrows():
+    rid = str(r.get("ID", "")).strip()
+    mad = str(r.get("Müşteri Adı", ""))
+    pno = str(r.get("Proforma No", ""))
+    if rid:
+        id_to_label[rid] = f"{mad} - {pno}"
+        id_to_keys[rid]  = (mad, pno)
+
+id_options = list(id_to_label.keys())
+
 sec_id_termin = st.selectbox(
     "Termin Tarihi Girilecek Sipariş",
-    options=siparisler["ID"].tolist(),
-    format_func=lambda _id: (
-        f"{siparisler.loc[siparisler['ID']==str(_id), 'Müşteri Adı'].values[0]} - "
-        f"{siparisler.loc[siparisler['ID']==str(_id), 'Proforma No'].values[0]}"
-    ) if (siparisler["ID"]==str(_id)).any() else str(_id)
+    options=id_options,
+    format_func=lambda _id: id_to_label.get(_id, str(_id))
 )
 
-# Varsayılan tarih
 def _safe_date(v, default=None):
-    if default is None:
-        default = datetime.date.today()
+    if default is None: default = datetime.date.today()
     try:
         ts = pd.to_datetime(v, errors="coerce")
         return ts.date() if pd.notna(ts) else default
     except Exception:
         return default
 
-# Seçilen siparişin mevcut terminini bul
-if sec_id_termin:
-    # Önce siparisler'den o satırı çek (fallback için lazım olacak)
-    row_sel = siparisler.loc[siparisler["ID"] == str(sec_id_termin)].iloc[0]
-    mevcut_termin = _safe_date(row_sel.get("Termin Tarihi", None))
-else:
-    mevcut_termin = datetime.date.today()
+# Varsayılan tarih (önce ID ile, sonra fallback ile oku)
+def _current_termin(selected_id: str) -> datetime.date:
+    if not selected_id:
+        return datetime.date.today()
 
-yeni_termin = st.date_input("Termin Tarihi", value=mevcut_termin, key="termin_input")
+    m_id = (df_proforma["ID"] == selected_id)
+    if m_id.any():
+        return _safe_date(df_proforma.loc[m_id, "Termin Tarihi"].iloc[0])
+
+    # Fallback: müşteri + proforma no
+    mad, pno = id_to_keys.get(selected_id, ("", ""))
+    if mad or pno:
+        m_fb = (df_proforma["Müşteri Adı"] == mad) & (df_proforma["Proforma No"] == pno)
+        if m_fb.any():
+            return _safe_date(df_proforma.loc[m_fb, "Termin Tarihi"].iloc[0])
+
+    return datetime.date.today()
+
+default_termin = _current_termin(sec_id_termin)
+yeni_termin = st.date_input("Termin Tarihi", value=default_termin, key="termin_input")
 
 if st.button("Termin Tarihini Kaydet"):
-    updated = False
-
-    # 1) Ana tabloda ID ile doğrudan eşleşme
-    mask_id = (df_proforma["ID"] == str(sec_id_termin))
-    if mask_id.any():
-        df_proforma.loc[mask_id, "Termin Tarihi"] = yeni_termin
-        updated = True
+    if not sec_id_termin:
+        st.error("Önce bir sipariş seçin.")
     else:
-        # 2) Fallback: Müşteri Adı + Proforma No ile bul ve güncelle
-        m_ad = row_sel["Müşteri Adı"]
-        p_no = row_sel["Proforma No"]
-        m_fallback = (df_proforma["Müşteri Adı"] == m_ad) & (df_proforma["Proforma No"] == p_no)
-        if m_fallback.any():
-            df_proforma.loc[m_fallback, "Termin Tarihi"] = yeni_termin
+        updated = False
+
+        # 1) ID ile güncelle
+        m_id = (df_proforma["ID"] == sec_id_termin)
+        if m_id.any():
+            df_proforma.loc[m_id, "Termin Tarihi"] = yeni_termin
             updated = True
+        else:
+            # 2) Fallback: müşteri + proforma
+            mad, pno = id_to_keys.get(sec_id_termin, ("", ""))
+            if mad or pno:
+                m_fb = (df_proforma["Müşteri Adı"] == mad) & (df_proforma["Proforma No"] == pno)
+                if m_fb.any():
+                    df_proforma.loc[m_fb, "Termin Tarihi"] = yeni_termin
+                    updated = True
 
-    if updated:
-        try:
-            update_google_sheets()
-            st.success("Termin tarihi kaydedildi!")
-            st.rerun()
-        except Exception as e:
-            st.warning(f"Termin yerelde güncellendi ancak Sheets yazımında hata oluştu: {e}")
-    else:
-        st.error("Seçilen ID ana tabloda bulunamadı (ID eşleşmesi yok). Müşteri + Proforma No ile de eşleşme sağlanamadı.")
-
+        if updated:
+            try:
+                update_google_sheets()
+                st.success("Termin tarihi kaydedildi!")
+                st.rerun()
+            except Exception as e:
+                st.warning(f"Termin yerelde güncellendi ancak Sheets yazımında sorun oluştu: {e}")
+        else:
+            st.error("Seçilen kayıt ana tabloda bulunamadı (ID ve fallback eşleşmedi).")
     # ================= Sevk Et (ETA’ya gönder) =================
     st.markdown("#### Siparişi Sevk Et (ETA Takibine Gönder)")
     sec_id_sevk = st.selectbox(
