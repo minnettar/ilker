@@ -41,11 +41,8 @@ _SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-# ---- Kimlik / İstemci yardımcıları ----
-from typing import Any, Optional
-
 def _get_sa_info() -> dict:
-    """st.secrets['gcp_service_account'] içeriğini döndürür; yoksa boş dict."""
+    """st.secrets['gcp_service_account'] içeriğini döndürür; yoksa KeyError."""
     return dict(st.secrets.get("gcp_service_account", {}))
 
 @st.cache_resource(show_spinner=False)
@@ -54,6 +51,7 @@ def get_drive_client():
     sa_info = _get_sa_info()
     if not sa_info:
         raise RuntimeError("Service Account bilgisi bulunamadı: st.secrets['gcp_service_account']")
+
     credentials = _LegacySA.from_json_keyfile_dict(sa_info, scopes=_SCOPES)
     gauth = GoogleAuth()
     gauth.credentials = credentials
@@ -69,26 +67,20 @@ def get_gspread_client():
     creds = _SA_Credentials.from_service_account_info(sa_info, scopes=_SCOPES)
     return gspread.authorize(creds)
 
-# ---- Lazy Drive yardımcıları (globalde kurma, ihtiyaçta kur) ----
-@st.cache_resource(show_spinner=False)
-def get_drive_or_none():
-    try:
-        return get_drive_client()
-    except Exception:
-        return None
+# ---- Cache yardımcıları ----
+def cache_data(ttl: int = 300):
+    """Kısa yol: @cache_data(ttl=300)."""
+    return st.cache_data(ttl=ttl, show_spinner=False)
 
-def ensure_drive():
-    """İhtiyaç anında Drive'ı kurar; kuramazsa None döner."""
-    key = "__drive_client__"
-    if key not in st.session_state:
-        st.session_state[key] = get_drive_or_none()
-    return st.session_state[key]
+def cache_resource():
+    """Kısa yol: @cache_resource."""
+    return st.cache_resource(show_spinner=False)
 
 # ---- Tarih & Para yardımcıları ----
 import pandas as _pd
 import numpy as _np
 
-def parse_date(s: Any) -> Optional[_pd.Timestamp]:
+def parse_date(s: Any) -> _pd.Timestamp | None:
     try:
         return _pd.to_datetime(s)
     except Exception:
@@ -114,7 +106,7 @@ def fmt_money(x: float, suffix: str = " USD") -> str:
 
 # ---- UI yardımcıları ----
 def confirm_modal(key: str, title: str, text: str) -> bool:
-    """Kritik işlemler için onay modalı. True -> onaylandı."""
+    """Kritik işlemler için onay modalı. True dönerse onaylanmış demektir."""
     opened = st.session_state.get(f"__modal_open_{key}", False)
     if st.button(title, key=f"btn_open_{key}"):
         st.session_state[f"__modal_open_{key}"] = True
@@ -133,6 +125,17 @@ def confirm_modal(key: str, title: str, text: str) -> bool:
                 return False
     return False
 
+# ---- Global drive nesnesi (yoksa) ----
+try:
+    _ = drive  # mevcutsa dokunma
+except NameError:
+    try:
+        drive = get_drive_client()
+    except Exception as e:
+        st.warning("Google Drive istemcisi oluşturulamadı. st.secrets ayarlarınızı kontrol edin.")
+        drive = None
+# ===========================
+
 # ---- Ana Sheet erişim yardımcıları ----
 import pandas as pd
 
@@ -142,6 +145,7 @@ def open_main_sheet():
     Ana Google Sheet'i açar.
     Öncelik: secrets.app.sheet_id -> yoksa kod içindeki SHEET_ID sabiti.
     """
+    # Önce secrets, yoksa sabit
     sheet_id = (st.secrets.get("app", {}).get("sheet_id", "") or SHEET_ID).strip()
     if not sheet_id:
         st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id girin veya SHEET_ID sabitini doldurun.")
@@ -155,7 +159,6 @@ def open_main_sheet():
     except Exception as e:
         st.error(f"Ana Sheet açılamadı: {e}")
         st.stop()
-
 @st.cache_data(ttl=300, show_spinner=False)
 def load_ws(ws_name: str) -> pd.DataFrame:
     """Ana Sheet içindeki bir çalışma sayfasını DataFrame olarak döndürür."""
@@ -167,7 +170,7 @@ def load_ws(ws_name: str) -> pd.DataFrame:
         return pd.DataFrame()
     rows = ws.get_all_records()
     return pd.DataFrame(rows)
-    
+
 # === /Revizyon 1 bloğu ===
 # ===========================
 
@@ -237,7 +240,8 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 
 LOGO_FILE_ID = "1DCxtSsAeR7Zfk2IQU0UMGmD0uTdNO1B3"
 LOGO_LOCAL_NAME = "logo1.png"
-
+EXCEL_FILE_ID = '1IF6CN4oHEMk6IEE40ZGixPkfnNHLYXnQ'
+EVRAK_KLASOR_ID = '14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J'
 FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
 
 
@@ -264,7 +268,10 @@ def get_drive():
 drive = get_drive()
 
 if not os.path.exists(LOGO_LOCAL_NAME):
-    logo_file = col1, col2 = st.columns([3, 7])
+    logo_file = drive.CreateFile({'id': LOGO_FILE_ID})
+    logo_file.GetContentFile(LOGO_LOCAL_NAME)
+
+col1, col2 = st.columns([3, 7])
 with col1:
     st.image(LOGO_LOCAL_NAME, width=300)
 with col2:
@@ -279,6 +286,7 @@ with col2:
     </div>
 """, unsafe_allow_html=True)
 
+downloaded = drive.CreateFile({'id': EXCEL_FILE_ID})
 downloaded.FetchMetadata(fetch_all=True)
 downloaded.GetContentFile("temp.xlsx")
 
@@ -2407,227 +2415,3 @@ with st.expander("🔄 Senkronizasyon", expanded=False):
     if st.button("Şimdi Senkronize Et"):
         msg = sync_local_and_sheet(auto=False, path="temp.xlsx")
         st.success(msg)
-
-
-# ===========================
-#  Google Sheets ↔ temp.xlsx
-#  (bidirectional, quota-safe)
-# ===========================
-import os, time, hashlib
-from typing import Optional, Dict, List
-import pandas as pd
-import streamlit as st
-import gspread
-from gspread_dataframe import set_with_dataframe
-from googleapiclient.discovery import build
-from google.oauth2.service_account import Credentials as SACredentials
-
-LOCAL_FILE = "temp.xlsx"
-API_MIN_DELAY = 2.0
-EXPECTED_SHEETS: List[str] = ["Sayfa1","Kayıtlar","Teklifler","Proformalar","Evraklar","ETA","FuarMusteri"]
-_SCOPES = ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
-
-def _get_sa_info_dict() -> dict:
-    try:
-        return dict(st.secrets["gcp_service_account"])
-    except Exception:
-        return {}
-
-@st.cache_resource(show_spinner=False)
-def get_gspread_client_sync():
-    sa = _get_sa_info_dict()
-    creds = SACredentials.from_service_account_info(sa, scopes=_SCOPES)
-    return gspread.authorize(creds)
-
-@st.cache_resource(show_spinner=False)
-def get_drive_service_sync():
-    sa = _get_sa_info_dict()
-    creds = SACredentials.from_service_account_info(sa, scopes=_SCOPES)
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
-
-def _backoff(fn, *args, **kwargs):
-    delay = 1.0
-    for _ in range(6):
-        try:
-            return fn(*args, **kwargs)
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(delay)
-                delay *= 2
-                continue
-            raise
-    return fn(*args, **kwargs)
-
-def _hash_df(df: pd.DataFrame) -> str:
-    try:
-        return hashlib.sha256(df.to_csv(index=False).encode("utf-8","ignore")).hexdigest()
-    except Exception:
-        return ""
-
-def _ensure_meta_sheet(sh):
-    try:
-        return sh.worksheet("Meta")
-    except Exception:
-        ws = sh.add_worksheet(title="Meta", rows=200, cols=3)
-        ws.update("A1", [["Sheet","Hash"]])
-        return ws
-
-def _get_last_hash(meta_ws, title: str) -> Optional[str]:
-    try:
-        for rec in meta_ws.get_all_records():
-            if (rec.get("Sheet") or "").strip() == title:
-                return (rec.get("Hash") or "").strip()
-    except Exception:
-        pass
-    return None
-
-def _upsert_hash(meta_ws, title: str, h: str):
-    try:
-        vals = meta_ws.get("A1:B200") or []
-        if not vals:
-            meta_ws.update("A1", [["Sheet","Hash"]])
-            vals = [["Sheet","Hash"]]
-        for i, row in enumerate(vals[1:], start=2):
-            if len(row)>=1 and (row[0] or "").strip()==title:
-                meta_ws.update_cell(i,2,h)
-                return
-        meta_ws.append_row([title,h])
-    except Exception:
-        pass
-
-def get_sheet_modified_time_sync(sheet_id: str) -> float:
-    try:
-        srv = get_drive_service_sync()
-        resp = _backoff(srv.files().get, fileId=sheet_id, fields="modifiedTime")
-        data = resp.execute()
-        iso = data.get("modifiedTime","")
-        if not iso:
-            return 0.0
-        try:
-            import pandas as _pd
-            return float(_pd.to_datetime(iso).timestamp())
-        except Exception:
-            from datetime import datetime
-            return datetime.fromisoformat(iso.replace("Z","+00:00")).timestamp()
-    except Exception:
-        return 0.0
-
-def get_local_mtime_sync(path: str = LOCAL_FILE) -> float:
-    try:
-        return os.path.getmtime(path)
-    except Exception:
-        return 0.0
-
-def read_all_from_sheet_sync(sheet_id: str) -> Dict[str, pd.DataFrame]:
-    gc = get_gspread_client_sync()
-    sh = gc.open_by_key(sheet_id)
-    dfs: Dict[str,pd.DataFrame] = {}
-    titles = [w.title for w in sh.worksheets()]
-    for name in EXPECTED_SHEETS:
-        if name in titles:
-            ws = sh.worksheet(name)
-            dfs[name] = pd.DataFrame(ws.get_all_records())
-            time.sleep(API_MIN_DELAY)
-        else:
-            dfs[name] = pd.DataFrame()
-    return dfs
-
-def write_one_ws_quota_safe_sync(ws, df: pd.DataFrame) -> str:
-    sh = ws.spreadsheet
-    meta_ws = _ensure_meta_sheet(sh)
-    new_hash = _hash_df(df if isinstance(df,pd.DataFrame) else pd.DataFrame())
-    last_hash = _get_last_hash(meta_ws, ws.title)
-    if last_hash and last_hash == new_hash:
-        return "skip"
-    _backoff(ws.clear)
-    _backoff(set_with_dataframe, ws, df if isinstance(df,pd.DataFrame) else pd.DataFrame())
-    _upsert_hash(meta_ws, ws.title, new_hash)
-    time.sleep(API_MIN_DELAY)
-    return "write"
-
-def write_all_to_sheet_sync(sheet_id: str, dfs: Dict[str,pd.DataFrame]) -> int:
-    gc = get_gspread_client_sync()
-    sh = gc.open_by_key(sheet_id)
-    titles = {w.title for w in sh.worksheets()}
-    for name in EXPECTED_SHEETS:
-        if name not in titles:
-            _backoff(sh.add_worksheet, title=name, rows=1000, cols=26)
-            time.sleep(API_MIN_DELAY)
-    writes = 0
-    for name in EXPECTED_SHEETS:
-        df = dfs.get(name, pd.DataFrame())
-        ws = sh.worksheet(name)
-        res = write_one_ws_quota_safe_sync(ws, df)
-        if res == "write":
-            writes += 1
-    return writes
-
-def read_all_from_excel_sync(path: str = LOCAL_FILE) -> Dict[str,pd.DataFrame]:
-    dfs: Dict[str,pd.DataFrame] = {}
-    if not os.path.exists(path):
-        for n in EXPECTED_SHEETS:
-            dfs[n] = pd.DataFrame()
-        return dfs
-    try:
-        for n in EXPECTED_SHEETS:
-            try:
-                dfs[n] = pd.read_excel(path, sheet_name=n)
-            except Exception:
-                dfs[n] = pd.DataFrame()
-    except Exception:
-        for n in EXPECTED_SHEETS:
-            dfs[n] = pd.DataFrame()
-    return dfs
-
-def write_all_to_excel_sync(dfs: Dict[str,pd.DataFrame], path: str = LOCAL_FILE, order: Optional[List[str]] = None):
-    order = order or EXPECTED_SHEETS
-    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
-        for name in order:
-            df = dfs.get(name, pd.DataFrame())
-            (df if isinstance(df,pd.DataFrame) else pd.DataFrame()).to_excel(writer, index=False, sheet_name=name)
-
-def sync_bidirectional(sheet_id: str, local_path: str = LOCAL_FILE) -> str:
-    sheet_ts = get_sheet_modified_time_sync(sheet_id)
-    local_ts = get_local_mtime_sync(local_path)
-    if sheet_ts == 0.0 and local_ts == 0.0:
-        return "Ne Google Sheets'e bağlanabildim ne de temp.xlsx bulundu."
-
-    if sheet_ts > local_ts:
-        dfs = read_all_from_sheet_sync(sheet_id)
-        write_all_to_excel_sync(dfs, local_path, order=EXPECTED_SHEETS)
-        try:
-            os.utime(local_path, (time.time(), sheet_ts))
-        except Exception:
-            pass
-        return "Google Sheets daha yeniydi → temp.xlsx güncellendi."
-    elif local_ts > sheet_ts:
-        dfs = read_all_from_excel_sync(local_path)
-        writes = write_all_to_sheet_sync(sheet_id, dfs)
-        return f"Lokal temp.xlsx daha yeniydi → Sheets güncellendi (yazılan sayfa: {writes})."
-    else:
-        return "Her iki taraf da güncel görünüyor. Değişiklik yapılmadı."
-
-
-
-# === Senkron UI (opsiyonel) ===
-try:
-    st.subheader("📂 Çift Yönlü Senkron")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("🔄 Hangisi güncelse onu senkronize et"):
-            try:
-                msg = sync_bidirectional(SHEET_ID, "temp.xlsx")
-                st.success(msg)
-            except Exception as e:
-                st.error(f"Senkron hatası: {e}")
-    with c2:
-        if st.button("📥 Sadece Sheets → Excel"):
-            try:
-                dfs = read_all_from_sheet_sync(SHEET_ID)
-                write_all_to_excel_sync(dfs, "temp.xlsx")
-                st.success("Sheets → temp.xlsx tamam.")
-            except Exception as e:
-                st.error(f"Hata: {e}")
-except Exception:
-    pass
-
