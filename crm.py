@@ -1,39 +1,42 @@
 import streamlit as st
 import pandas as pd
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-import io
-import os
-import datetime
-import smtplib
-from email.message import EmailMessage
 import numpy as np
-import tempfile
+import gspread
+import datetime
+import io
+import json
+import os
 import re
+import smtplib
 import sqlite3
-from google.oauth2 import service_account
+import tempfile
+import time
+from gspread_dataframe import set_with_dataframe
+from google.oauth2.service_account import Credentials as _SA_Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from oauth2client.service_account import ServiceAccountCredentials
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from email.message import EmailMessage
+
+
 SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 
 # =============================
 # === CRM ILKER: Revizyon 1 ===
 # === Güvenli erişim & yardımcılar
 # =============================
-import json
-from typing import Optional, Any, Dict, List
-import streamlit as st
+
 
 # ---- Google Service Account ile Drive & Sheets istemcileri ----
 try:
-    import gspread
-    from google.oauth2.service_account import Credentials as _SA_Credentials
+
+
     _HAS_GSPREAD = True
 except Exception:
     _HAS_GSPREAD = False
     _SA_Credentials = None
-
-from oauth2client.service_account import ServiceAccountCredentials as _LegacySA  # PyDrive2 için
 
 _SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -76,8 +79,7 @@ def cache_resource():
     return st.cache_resource(show_spinner=False)
 
 # ---- Tarih & Para yardımcıları ----
-import pandas as _pd
-import numpy as _np
+
 
 def parse_date(s: Any) -> _pd.Timestamp | None:
     try:
@@ -136,7 +138,7 @@ except NameError:
 # ===========================
 
 # ---- Ana Sheet erişim yardımcıları ----
-import pandas as pd
+
 
 @st.cache_resource(show_spinner=False)
 def open_main_sheet():
@@ -144,8 +146,10 @@ def open_main_sheet():
     Ana Google Sheet'i açar.
     Öncelik: secrets.app.sheet_id -> yoksa kod içindeki SHEET_ID sabiti.
     """
-    # Önce secrets, yoksa sabit
-    sheet_id = (st.secrets.get("app", {}).get("sheet_id", "") or SHEET_ID).strip()
+    try:
+        sheet_id = (st.secrets.get("app", {}).get("sheet_id", "") or SHEET_ID).strip()
+    except Exception:
+        sheet_id = SHEET_ID
     if not sheet_id:
         st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id girin veya SHEET_ID sabitini doldurun.")
         st.stop()
@@ -158,6 +162,8 @@ def open_main_sheet():
     except Exception as e:
         st.error(f"Ana Sheet açılamadı: {e}")
         st.stop()
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_ws(ws_name: str) -> pd.DataFrame:
     """Ana Sheet içindeki bir çalışma sayfasını DataFrame olarak döndürür."""
@@ -246,22 +252,14 @@ FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
 
 
 # --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-from oauth2client.service_account import ServiceAccountCredentials
+
+
 
 _SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
-@st.cache_resource(show_spinner=False)
-
-# --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
-import streamlit as st
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-from oauth2client.service_account import ServiceAccountCredentials
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
@@ -270,15 +268,13 @@ SCOPES = [
 
 @st.cache_resource(show_spinner=False)
 def get_drive():
-    """
-    Google Drive istemcisi (Service Account). LocalWebserverAuth kullanılmaz.
-    Streamlit Cloud'da Settings → Secrets içine gcp_service_account JSON'unu koy.
-    """
-    sa_info = dict(st.secrets["gcp_service_account"])  # veya doğrudan JSON dict
+    """Google Drive istemcisi (Service Account)."""
+    sa_info = dict(st.secrets["gcp_service_account"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scopes=SCOPES)
     gauth = GoogleAuth()
     gauth.credentials = creds
     return GoogleDrive(gauth)
+
 
 drive = get_drive()
 
@@ -486,10 +482,6 @@ st.sidebar.radio(
 menu = st.session_state.menu_state
 # ========= /ŞIK MENÜ =========
 
-
-
-import smtplib
-from email.message import EmailMessage
 
 # Yeni cari için txt dosyasını oluşturma fonksiyonu
 def yeni_cari_txt_olustur(cari_dict, file_path="yeni_cari.txt"):
@@ -781,8 +773,6 @@ if menu == "Cari Ekleme":
 ### === MÜŞTERİ LİSTESİ MENÜSÜ ===
 ### ===========================
 
-import numpy as np  # Eksik bilgi mesajı için gerekli
-
 if "Vade (Gün)" not in df_musteri.columns:
     df_musteri["Vade (Gün)"] = ""
 if "Ülke" not in df_musteri.columns:
@@ -975,7 +965,6 @@ elif menu == "Fiyat Teklifleri":
         yeni_no = max(mevcut_nolar) + 1
         return f"TKF-{yeni_no:04d}"
 
-    import time
     def güvenli_sil(dosya_adı, tekrar=5, bekle=1):
         for _ in range(tekrar):
             try:
@@ -1541,7 +1530,7 @@ elif menu == "Vade Takibi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Vade Takibi</h2>", unsafe_allow_html=True)
 
     # ==== Drive ayarları (ANA klasörünüz) ====
-    import tempfile, re
+
     ROOT_EXPORT_FOLDER_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"  # İhracat evrakları ana klasör ID
 
     def safe_name(text, maxlen=120):
@@ -1698,8 +1687,6 @@ elif menu == "Vade Takibi":
 ### ===========================
 elif menu == "ETA Takibi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>ETA Takibi</h2>", unsafe_allow_html=True)
-
-    import re, tempfile
 
     # ---- Sabitler ----
     ROOT_EXPORT_FOLDER_ID = "14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J"  # İhracat Evrakları ana klasör ID
@@ -2287,10 +2274,8 @@ elif menu == "Satış Performansı":
 # Not: Lokal senkron için secrets gereklidir (service account ile bağlanmak için).
 # =============================
 
-import os
-import time
-import pandas as pd
-from typing import Dict, List, Tuple, Optional
+
+
 
 def _get_meta_ws():
     """Meta sayfasını getirir; yoksa oluşturur."""
@@ -2360,7 +2345,7 @@ def _write_sheet_all(dfs: Dict[str, pd.DataFrame]):
     # Tüm sayfaları Google Sheets'e yaz (tam sayfa güncelleme)
     # gspread-dataframe kullanımı:
     try:
-        from gspread_dataframe import set_with_dataframe
+
     except Exception:
         st.error("gspread-dataframe kütüphanesi eksik. requirements.txt içine 'gspread-dataframe' ekleyin.")
         st.stop()
