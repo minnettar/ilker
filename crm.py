@@ -19,6 +19,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from email.message import EmailMessage
+from typing import Optional
 
 
 SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
@@ -81,7 +82,7 @@ def cache_resource():
 # ---- Tarih & Para yardımcıları ----
 
 
-def parse_date(s: Any) -> _pd.Timestamp | None:
+def parse_date(s: Any) -> Optional[_pd.Timestamp]:
     try:
         return _pd.to_datetime(s)
     except Exception:
