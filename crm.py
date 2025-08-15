@@ -1826,8 +1826,7 @@ elif menu == "Güncel Sipariş Durumu":
         if c not in df_proforma.columns:
             df_proforma[c] = ""
 
-    # Eski satırlarda boş ID'leri doldur
-    bos_id = df_proforma["ID"].astype(str).str.strip().isin(["", "nan", "None"])
+    bos_id = df_proforma["ID"].astype(str).str.strip().isin(["","nan","None"])
     if bos_id.any():
         df_proforma.loc[bos_id, "ID"] = [str(uuid.uuid4()) for _ in range(bos_id.sum())]
         update_google_sheets()
@@ -1852,8 +1851,22 @@ elif menu == "Güncel Sipariş Durumu":
     g["Tarih"] = pd.to_datetime(g["Tarih"], errors="coerce").dt.strftime("%d/%m/%Y")
     g["Termin Tarihi"] = pd.to_datetime(g["Termin Tarihi"], errors="coerce").dt.strftime("%d/%m/%Y")
 
-    # (PYARROW) Duplicate başlıklar varsa sadece İLK olanı alarak göster
-    def _first_present(df, name: str):
+    # --- PYARROW duplicate column name guard ---
+    def _dedupe_columns(df: pd.DataFrame) -> pd.DataFrame:
+        seen = {}
+        new_cols = []
+        for c in df.columns:
+            if c not in seen:
+                seen[c] = 0
+                new_cols.append(c)
+            else:
+                seen[c] += 1
+                new_cols.append(f"{c}__{seen[c]}")  # Açıklama__1 gibi
+        out = df.copy()
+        out.columns = new_cols
+        return out
+
+    def _first_present(df: pd.DataFrame, name: str):
         cols = [c for c in df.columns if c == name]
         return cols[0] if cols else None
 
@@ -1862,25 +1875,19 @@ elif menu == "Güncel Sipariş Durumu":
     safe_cols = [c for c in (_first_present(g, n) for n in wanted) if c]
 
     st.markdown("<h4 style='color:#219A41; font-weight:bold;'>Tüm Siparişe Dönüşenler</h4>", unsafe_allow_html=True)
-    st.dataframe(g[safe_cols], use_container_width=True)
+    st.dataframe(_dedupe_columns(g[safe_cols]), use_container_width=True)
 
     # ================= Termin Tarihi Güncelle =================
     st.markdown("#### Termin Tarihi Güncelle")
-    # Bazı ID'ler NaN olmasın diye dizeye çevir
-    id_options = siparisler["ID"].astype(str).tolist()
     sec_id_termin = st.selectbox(
         "Termin Tarihi Girilecek Sipariş",
-        options=id_options,
-        format_func=lambda _id: f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Müşteri Adı'].values[0]} - "
-                                f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Proforma No'].values[0]}"
+        options=siparisler["ID"].astype(str).tolist(),
+        format_func=lambda _id: f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Müşteri Adı'].values[0]} - {siparisler.loc[siparisler['ID'].astype(str)==_id, 'Proforma No'].values[0]}"
     )
 
-    mask_termin = (df_proforma["ID"].astype(str) == sec_id_termin)
+    mask_termin = (df_proforma["ID"].astype(str) == str(sec_id_termin))
     try:
-        mevcut_termin_ts = pd.to_datetime(
-            df_proforma.loc[mask_termin, "Termin Tarihi"].iloc[0] if mask_termin.any() else None,
-            errors="coerce"
-        )
+        mevcut_termin_ts = pd.to_datetime(df_proforma.loc[mask_termin, "Termin Tarihi"].values[0], errors="coerce")
         default_termin = mevcut_termin_ts.date() if pd.notna(mevcut_termin_ts) else datetime.date.today()
     except Exception:
         default_termin = datetime.date.today()
@@ -1888,7 +1895,7 @@ elif menu == "Güncel Sipariş Durumu":
     yeni_termin = st.date_input("Termin Tarihi", value=default_termin, key="termin_input")
 
     if st.button("Termin Tarihini Kaydet"):
-        df_proforma.loc[mask_termin, "Termin Tarihi"] = yeni_termin
+        df_proforma.loc[mask_termin, "Termin Tarihi"] = pd.to_datetime(yeni_termin)
         update_google_sheets()
         st.success("Termin tarihi kaydedildi!")
         st.rerun()
@@ -1897,15 +1904,13 @@ elif menu == "Güncel Sipariş Durumu":
     st.markdown("#### Siparişi Sevk Et (ETA Takibine Gönder)")
     sec_id_sevk = st.selectbox(
         "Sevk Edilecek Sipariş",
-        options=id_options,
-        format_func=lambda _id: f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Müşteri Adı'].values[0]} - "
-                                f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Proforma No'].values[0]}",
+        options=siparisler["ID"].astype(str).tolist(),
+        format_func=lambda _id: f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Müşteri Adı'].values[0]} - {siparisler.loc[siparisler['ID'].astype(str)==_id, 'Proforma No'].values[0]}",
         key="sevk_sec"
     )
-
     if st.button("Sevkedildi → ETA'ya Ekle"):
         # Proforma'dan bilgiler
-        row = df_proforma.loc[df_proforma["ID"].astype(str) == sec_id_sevk].iloc[0]
+        row = df_proforma.loc[df_proforma["ID"].astype(str) == str(sec_id_sevk)].iloc[0]
 
         # ETA kolon güvenliği
         for col in ["Müşteri Adı","Proforma No","ETA Tarihi","Açıklama"]:
@@ -1925,7 +1930,7 @@ elif menu == "Güncel Sipariş Durumu":
             }])], ignore_index=True)
 
         # Proforma'yı işaretle
-        df_proforma.loc[df_proforma["ID"].astype(str) == sec_id_sevk, "Sevk Durumu"] = "Sevkedildi"
+        df_proforma.loc[df_proforma["ID"].astype(str) == str(sec_id_sevk), "Sevk Durumu"] = "Sevkedildi"
         update_google_sheets()
         st.success("Sipariş sevkedildi ve ETA takibine gönderildi!")
         st.rerun()
@@ -1934,13 +1939,12 @@ elif menu == "Güncel Sipariş Durumu":
     st.markdown("#### Siparişi Beklemeye Al (Geri Çağır)")
     sec_id_geri = st.selectbox(
         "Beklemeye Alınacak Sipariş",
-        options=id_options,
-        format_func=lambda _id: f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Müşteri Adı'].values[0]} - "
-                                f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Proforma No'].values[0]}",
+        options=siparisler["ID"].astype(str).tolist(),
+        format_func=lambda _id: f"{siparisler.loc[siparisler['ID'].astype(str)==_id, 'Müşteri Adı'].values[0]} - {siparisler.loc[siparisler['ID'].astype(str)==_id, 'Proforma No'].values[0]}",
         key="geri_sec"
     )
     if st.button("Beklemeye Al / Geri Çağır"):
-        m = (df_proforma["ID"].astype(str) == sec_id_geri)
+        m = (df_proforma["ID"].astype(str) == str(sec_id_geri))
         df_proforma.loc[m, ["Durum","Sevk Durumu","Termin Tarihi"]] = ["Beklemede","",""]
         update_google_sheets()
         st.success("Sipariş tekrar bekleyen proformalar listesine alındı!")
