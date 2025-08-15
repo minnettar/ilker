@@ -371,44 +371,12 @@ def update_excel():
     downloaded.SetContentFile("temp.xlsx")
     downloaded.Upload()
 
-# ========= ŞIK SIDEBAR MENÜ (RADIO TABANLI) =========
+import streamlit as st
 
-# ========= ŞIK SIDEBAR MENÜ (RADIO + ANINDA STATE) =========
-
-# 1) Menü tanımı (ikonlar)
-menuler = [
-    ("Özet Ekran", "📊"),
-    ("Cari Ekleme", "🧑‍💼"),
-    ("Müşteri Listesi", "📒"),
-    ("Görüşme / Arama / Ziyaret Kayıtları", "☎️"),
-    ("Fiyat Teklifleri", "💰"),
-    ("Proforma Takibi", "📄"),
-    ("Güncel Sipariş Durumu", "🚚"),
-    ("Fatura & İhracat Evrakları", "📑"),
-    ("Vade Takibi", "⏰"),
-    ("ETA Takibi", "🛳️"),
-    ("Fuar Müşteri Kayıtları", "🎫"),
-    ("Medya Çekmecesi", "🗂️"),
-    ("Satış Performansı", "📈"),
-]
-
-# 2) Kullanıcıya göre izinli menüler
-if st.session_state.user == "Boss":
-    allowed_menus = [("Özet Ekran", "📊")]
-else:
-    allowed_menus = menuler
-
-# 3) Etiketler ve haritalar
-labels = [f"{ikon} {isim}" for (isim, ikon) in allowed_menus]
-name_by_label = {f"{ikon} {isim}": isim for (isim, ikon) in allowed_menus}
-label_by_name = {isim: f"{ikon} {isim}" for (isim, ikon) in allowed_menus}
-
-# 4) Varsayılan state
-if "menu_state" not in st.session_state:
-    st.session_state.menu_state = allowed_menus[0][0]
-
-# 5) CSS (radio’yu kart gibi; input’u gizlemiyoruz)
-st.sidebar.markdown("""
+# ================== Yardımcı: CSS Enjeksiyonu ==================
+def inject_sidebar_css():
+    st.sidebar.markdown(
+        """
 <style>
 section[data-testid="stSidebar"] { padding-top: 0.5rem; }
 div[data-testid="stSidebar"] .stRadio > div { gap: 10px !important; }
@@ -425,7 +393,7 @@ div[data-testid="stSidebar"] .stRadio label span { font-weight: 700; color: #fff
 div[data-testid="stSidebar"] .stRadio label:hover { filter: brightness(1.08); transform: translateY(-1px); }
 div[data-testid="stSidebar"] .stRadio [aria-checked="true"] { outline: 2px solid rgba(255,255,255,0.25); }
 
-/* Kart arka planları (sıra) */
+/* Kart arka planları (sıralı) */
 div[data-testid="stSidebar"] .stRadio label:nth-child(1)  { background: linear-gradient(90deg,#1D976C,#93F9B9); }  /* Özet */
 div[data-testid="stSidebar"] .stRadio label:nth-child(2)  { background: linear-gradient(90deg,#43cea2,#185a9d); }  /* Cari */
 div[data-testid="stSidebar"] .stRadio label:nth-child(3)  { background: linear-gradient(90deg,#ffb347,#ffcc33); }  /* Müşteri */
@@ -439,31 +407,144 @@ div[data-testid="stSidebar"] .stRadio label:nth-child(10) { background: linear-g
 div[data-testid="stSidebar"] .stRadio label:nth-child(11) { background: linear-gradient(90deg,#8e54e9,#bd4de6); }  /* Fuar */
 div[data-testid="stSidebar"] .stRadio label:nth-child(12) { background: linear-gradient(90deg,#4b79a1,#283e51); }  /* Medya */
 div[data-testid="stSidebar"] .stRadio label:nth-child(13) { background: linear-gradient(90deg,#2b5876,#4e4376); }  /* Satış Perf. */
-div[data-testid="stSidebar"] .stRadio label:nth-child(14) { background: linear-gradient(90deg,#667eea,#764ba2); }  /* Veritabanı */
 </style>
-""", unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
-# 6) Callback: seçilince anında state yaz
-def _on_menu_change():
-    sel_label = st.session_state.menu_radio_label
-    st.session_state.menu_state = name_by_label.get(sel_label, allowed_menus[0][0])
+# ================== Menü Tanımı ==================
+MENULER = [
+    ("Özet Ekran", "📊"),
+    ("Cari Ekleme", "🧑‍💼"),
+    ("Müşteri Listesi", "📒"),
+    ("Görüşme / Arama / Ziyaret Kayıtları", "☎️"),
+    ("Fiyat Teklifleri", "💰"),
+    ("Proforma Takibi", "📄"),
+    ("Güncel Sipariş Durumu", "🚚"),
+    ("Fatura & İhracat Evrakları", "📑"),
+    ("Vade Takibi", "⏰"),
+    ("ETA Takibi", "🛳️"),
+    ("Fuar Müşteri Kayıtları", "🎫"),
+    ("Medya Çekmecesi", "🗂️"),
+    ("Satış Performansı", "📈"),
+]
 
-# 7) Radio’yu mevcut state’e göre başlat
-current_label = label_by_name.get(st.session_state.menu_state, labels[0])
-current_index = labels.index(current_label) if current_label in labels else 0
+def get_allowed_menus():
+    user = st.session_state.get("user")  # örn: "Boss"
+    if user == "Boss":
+        return [("Özet Ekran", "📊")]
+    return MENULER
 
-st.sidebar.radio(
-    "Menü",
-    labels,
-    index=current_index,
-    label_visibility="collapsed",
-    key="menu_radio_label",
-    on_change=_on_menu_change
-)
+def build_labels(allowed_menus):
+    labels = [f"{icon} {name}" for (name, icon) in allowed_menus]
+    name_by_label = {f"{icon} {name}": name for (name, icon) in allowed_menus}
+    label_by_name = {name: f"{icon} {name}" for (name, icon) in allowed_menus}
+    return labels, name_by_label, label_by_name
 
-# 8) Kullanım: seçili menü adı
-menu = st.session_state.menu_state
-# ========= /ŞIK MENÜ =========
+# ================== Sayfa Placeholder'ları ==================
+def sayfa_ozet():
+    st.title("📊 Özet Ekran")
+    st.write("Buraya özet metrikler, KPI kartları, grafikleri ekleyebilirsin.")
+
+def sayfa_cari():
+    st.title("🧑‍💼 Cari Ekleme")
+    st.write("Cari ekleme formu burada olacak…")
+
+def sayfa_musteri():
+    st.title("📒 Müşteri Listesi")
+    st.write("Müşteri tablosu burada gösterilir…")
+
+def sayfa_gorusme():
+    st.title("☎️ Görüşme / Arama / Ziyaret Kayıtları")
+    st.write("Görüşme kayıt formu & listesi…")
+
+def sayfa_teklif():
+    st.title("💰 Fiyat Teklifleri")
+    st.write("Teklif oluşturma ve listeleme…")
+
+def sayfa_proforma():
+    st.title("📄 Proforma Takibi")
+    st.write("Proforma listesi ve durumları…")
+
+def sayfa_siparis():
+    st.title("🚚 Güncel Sipariş Durumu")
+    st.write("Siparişlerin son durumu…")
+
+def sayfa_evrak():
+    st.title("📑 Fatura & İhracat Evrakları")
+    st.write("Evrak yükleme & indirme…")
+
+def sayfa_vade():
+    st.title("⏰ Vade Takibi")
+    st.write("Tahsilat vadeleri ve alacaklar…")
+
+def sayfa_eta():
+    st.title("🛳️ ETA Takibi")
+    st.write("Sevkiyat/ETA bilgileri…")
+
+def sayfa_fuar():
+    st.title("🎫 Fuar Müşteri Kayıtları")
+    st.write("Fuar sonrası lead listesi…")
+
+def sayfa_medya():
+    st.title("🗂️ Medya Çekmecesi")
+    st.write("Dosya/Görsel arşivi…")
+
+def sayfa_satis_perf():
+    st.title("📈 Satış Performansı")
+    st.write("Satış raporları, dönemsel kıyaslar…")
+
+PAGE_FUNCS = {
+    "Özet Ekran": sayfa_ozet,
+    "Cari Ekleme": sayfa_cari,
+    "Müşteri Listesi": sayfa_musteri,
+    "Görüşme / Arama / Ziyaret Kayıtları": sayfa_gorusme,
+    "Fiyat Teklifleri": sayfa_teklif,
+    "Proforma Takibi": sayfa_proforma,
+    "Güncel Sipariş Durumu": sayfa_siparis,
+    "Fatura & İhracat Evrakları": sayfa_evrak,
+    "Vade Takibi": sayfa_vade,
+    "ETA Takibi": sayfa_eta,
+    "Fuar Müşteri Kayıtları": sayfa_fuar,
+    "Medya Çekmecesi": sayfa_medya,
+    "Satış Performansı": sayfa_satis_perf,
+}
+
+# ================== Render ==================
+def render_sidebar_menu():
+    inject_sidebar_css()
+    allowed_menus = get_allowed_menus()
+    labels, name_by_label, label_by_name = build_labels(allowed_menus)
+
+    # Varsayılan state
+    if "menu_state" not in st.session_state:
+        st.session_state.menu_state = allowed_menus[0][0]
+
+    # Mevcut seçim → label
+    current_label = label_by_name.get(st.session_state.menu_state, labels[0])
+    current_index = labels.index(current_label) if current_label in labels else 0
+
+    # Callback
+    def _on_change():
+        sel_label = st.session_state.get("menu_radio_label")
+        st.session_state.menu_state = name_by_label.get(sel_label, allowed_menus[0][0])
+
+    st.sidebar.radio(
+        "Menü",
+        labels,
+        index=current_index,
+        label_visibility="collapsed",
+        key="menu_radio_label",
+        on_change=_on_change,
+    )
+
+def render_page():
+    menu = st.session_state.get("menu_state")
+    PAGE_FUNCS.get(menu, sayfa_ozet)()  # default: özet
+
+# ==== Kullanım (main) ====
+render_sidebar_menu()
+render_page()
 
 
 
