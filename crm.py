@@ -237,8 +237,7 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 
 LOGO_FILE_ID = "1DCxtSsAeR7Zfk2IQU0UMGmD0uTdNO1B3"
 LOGO_LOCAL_NAME = "logo1.png"
-EXCEL_FILE_ID = '1IF6CN4oHEMk6IEE40ZGixPkfnNHLYXnQ'
-EVRAK_KLASOR_ID = '14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J'
+
 FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
 
 
@@ -265,10 +264,7 @@ def get_drive():
 drive = get_drive()
 
 if not os.path.exists(LOGO_LOCAL_NAME):
-    logo_file = drive.CreateFile({'id': LOGO_FILE_ID})
-    logo_file.GetContentFile(LOGO_LOCAL_NAME)
-
-col1, col2 = st.columns([3, 7])
+    logo_file = col1, col2 = st.columns([3, 7])
 with col1:
     st.image(LOGO_LOCAL_NAME, width=300)
 with col2:
@@ -283,7 +279,6 @@ with col2:
     </div>
 """, unsafe_allow_html=True)
 
-downloaded = drive.CreateFile({'id': EXCEL_FILE_ID})
 downloaded.FetchMetadata(fetch_all=True)
 downloaded.GetContentFile("temp.xlsx")
 
