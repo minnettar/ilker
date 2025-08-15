@@ -265,6 +265,7 @@ drive = get_drive()
 
 if not os.path.exists(LOGO_LOCAL_NAME):
     logo_file = col1, col2 = st.columns([3, 7])
+col1, col2 = st.columns([3, 7])
 with col1:
     st.image(LOGO_LOCAL_NAME, width=300)
 with col2:
@@ -277,6 +278,7 @@ with col2:
             ŞEKEROĞLU İHRACAT CRM
         </h1>
     </div>
+""", unsafe_allow_html=True)
 """, unsafe_allow_html=True)
 
 downloaded.FetchMetadata(fetch_all=True)
