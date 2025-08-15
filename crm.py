@@ -241,10 +241,26 @@ FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
 
 
 @st.cache_resource
+
+# --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
+
+_SCOPES = [
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/spreadsheets",
+]
+
+@st.cache_resource(show_spinner=False)
 def get_drive():
+    """Google Drive istemcisi (Service Account). LocalWebserverAuth kullanılmaz."""
+    sa_info = dict(st.secrets["gcp_service_account"])  # secrets.toml veya Cloud Secrets
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scopes=_SCOPES)
     gauth = GoogleAuth()
-    gauth.LocalWebserverAuth()
+    gauth.credentials = creds
     return GoogleDrive(gauth)
+
 drive = get_drive()
 
 if not os.path.exists(LOGO_LOCAL_NAME):
