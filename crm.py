@@ -729,7 +729,7 @@ except NameError:
                 break
         return False
 
-elif menu == "Görüşme / Arama / Ziyaret Kayıtları":
+if menu == "Görüşme / Arama / Ziyaret Kayıtları":
     # --- Her menüye geçişte dataframe’leri tekrar yükle ---
     if os.path.exists("temp.xlsx"):
         df_musteri = pd.read_excel("temp.xlsx", sheet_name=0)
