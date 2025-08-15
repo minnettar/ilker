@@ -10,10 +10,163 @@ from email.message import EmailMessage
 import numpy as np
 import tempfile
 import re
-import sqlite3
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+
+# =============================
+# === CRM ILKER: Revizyon 1 ===
+# === Güvenli erişim & yardımcılar
+# =============================
+import json
+from typing import Optional, Any, Dict, List
+import streamlit as st
+
+# ---- Google Service Account ile Drive & Sheets istemcileri ----
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials as _SA_Credentials
+    _HAS_GSPREAD = True
+except Exception:
+    _HAS_GSPREAD = False
+    _SA_Credentials = None
+
+from oauth2client.service_account import ServiceAccountCredentials as _LegacySA  # PyDrive2 için
+
+_SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+def _get_sa_info() -> dict:
+    """st.secrets['gcp_service_account'] içeriğini döndürür; yoksa KeyError."""
+    return dict(st.secrets.get("gcp_service_account", {}))
+
+@st.cache_resource(show_spinner=False)
+def get_drive_client():
+    """PyDrive2 için GoogleDrive istemcisi (Service Account) üretir."""
+    sa_info = _get_sa_info()
+    if not sa_info:
+        raise RuntimeError("Service Account bilgisi bulunamadı: st.secrets['gcp_service_account']")
+
+    credentials = _LegacySA.from_json_keyfile_dict(sa_info, scopes=_SCOPES)
+    gauth = GoogleAuth()
+    gauth.credentials = credentials
+    drive_client = GoogleDrive(gauth)
+    return drive_client
+
+@st.cache_resource(show_spinner=False)
+def get_gspread_client():
+    """Varsa gspread istemcisi döndürür; yoksa None."""
+    if not _HAS_GSPREAD or _SA_Credentials is None:
+        return None
+    sa_info = _get_sa_info()
+    creds = _SA_Credentials.from_service_account_info(sa_info, scopes=_SCOPES)
+    return gspread.authorize(creds)
+
+# ---- Cache yardımcıları ----
+def cache_data(ttl: int = 300):
+    """Kısa yol: @cache_data(ttl=300)."""
+    return st.cache_data(ttl=ttl, show_spinner=False)
+
+def cache_resource():
+    """Kısa yol: @cache_resource."""
+    return st.cache_resource(show_spinner=False)
+
+# ---- Tarih & Para yardımcıları ----
+import pandas as _pd
+import numpy as _np
+
+def parse_date(s: Any) -> _pd.Timestamp | None:
+    try:
+        return _pd.to_datetime(s)
+    except Exception:
+        return None
+
+def parse_money(x: Any) -> float:
+    if x is None:
+        return 0.0
+    if isinstance(x, (int, float)):
+        return float(x)
+    s = str(x).replace(".", "").replace(" ", "").replace("₺", "").replace("$", "").replace("€", "")
+    s = s.replace(",", ".")
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
+
+def fmt_money(x: float, suffix: str = " USD") -> str:
+    try:
+        return f"{float(x):,.2f}{suffix}"
+    except Exception:
+        return f"{x}{suffix}"
+
+# ---- UI yardımcıları ----
+def confirm_modal(key: str, title: str, text: str) -> bool:
+    """Kritik işlemler için onay modalı. True dönerse onaylanmış demektir."""
+    opened = st.session_state.get(f"__modal_open_{key}", False)
+    if st.button(title, key=f"btn_open_{key}"):
+        st.session_state[f"__modal_open_{key}"] = True
+        opened = True
+    if opened:
+        with st.modal(title):
+            st.write(text)
+            c1, c2 = st.columns(2)
+            ok = c1.button("Onayla", key=f"ok_{key}")
+            cancel = c2.button("Vazgeç", key=f"cancel_{key}")
+            if ok:
+                st.session_state[f"__modal_open_{key}"] = False
+                return True
+            if cancel:
+                st.session_state[f"__modal_open_{key}"] = False
+                return False
+    return False
+
+# ---- Global drive nesnesi (yoksa) ----
+try:
+    _ = drive  # mevcutsa dokunma
+except NameError:
+    try:
+        drive = get_drive_client()
+    except Exception as e:
+        st.warning("Google Drive istemcisi oluşturulamadı. st.secrets ayarlarınızı kontrol edin.")
+        drive = None
+# ===========================
+
+# ---- Ana Sheet erişim yardımcıları ----
+import pandas as pd
+
+@st.cache_resource(show_spinner=False)
+def open_main_sheet():
+    """Ana Google Sheet'i secrets.app.sheet_id üzerinden açar."""
+    sheet_id = st.secrets.get("app", {}).get("sheet_id", "").strip()
+    if not sheet_id:
+        st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id değerini girin.")
+        st.stop()
+    gc = get_gspread_client()
+    if gc is None:
+        st.error("gspread istemcisi oluşturulamadı. Google Service Account ayarlarını kontrol edin.")
+        st.stop()
+    try:
+        return gc.open_by_key(sheet_id)
+    except Exception as e:
+        st.error(f"Ana Sheet açılamadı: {e}")
+        st.stop()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_ws(ws_name: str) -> pd.DataFrame:
+    """Ana Sheet içindeki bir çalışma sayfasını DataFrame olarak döndürür."""
+    sh = open_main_sheet()
+    try:
+        ws = sh.worksheet(ws_name)
+    except Exception as e:
+        st.error(f"Çalışma sayfası bulunamadı: {ws_name} - {e}")
+        return pd.DataFrame()
+    rows = ws.get_all_records()
+    return pd.DataFrame(rows)
+
+# === /Revizyon 1 bloğu ===
+# ===========================
 
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
 
@@ -205,6 +358,7 @@ def update_excel():
 
 # ========= ŞIK SIDEBAR MENÜ (RADIO TABANLI) =========
 
+# ========= ŞIK SIDEBAR MENÜ (RADIO + ANINDA STATE) =========
 
 # 1) Menü tanımı (ikonlar)
 menuler = [
