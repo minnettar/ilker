@@ -15,6 +15,8 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
+SHEET_ID = "A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
+
 # =============================
 # === CRM ILKER: Revizyon 1 ===
 # === Güvenli erişim & yardımcılar
@@ -22,8 +24,6 @@ from googleapiclient.http import MediaIoBaseDownload
 import json
 from typing import Optional, Any, Dict, List
 import streamlit as st
-
-SHEET_ID = "A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 
 # ---- Google Service Account ile Drive & Sheets istemcileri ----
 try:
@@ -141,10 +141,14 @@ import pandas as pd
 
 @st.cache_resource(show_spinner=False)
 def open_main_sheet():
-    """Ana Google Sheet'i secrets.app.sheet_id üzerinden açar."""
-    sheet_id = st.secrets.get("app", {}).get("sheet_id", "").strip()
+    """
+    Ana Google Sheet'i açar.
+    Öncelik: secrets.app.sheet_id -> yoksa kod içindeki SHEET_ID sabiti.
+    """
+    # Önce secrets, yoksa sabit
+    sheet_id = (st.secrets.get("app", {}).get("sheet_id", "") or SHEET_ID).strip()
     if not sheet_id:
-        st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id değerini girin.")
+        st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id girin veya SHEET_ID sabitini doldurun.")
         st.stop()
     gc = get_gspread_client()
     if gc is None:
@@ -155,7 +159,6 @@ def open_main_sheet():
     except Exception as e:
         st.error(f"Ana Sheet açılamadı: {e}")
         st.stop()
-
 @st.cache_data(ttl=300, show_spinner=False)
 def load_ws(ws_name: str) -> pd.DataFrame:
     """Ana Sheet içindeki bir çalışma sayfasını DataFrame olarak döndürür."""
@@ -242,7 +245,6 @@ EVRAK_KLASOR_ID = '14FTE1oSeIeJ6Y_7C0oQyZPKC8dK8hr1J'
 FIYAT_TEKLIFI_ID = '1TNjwx-xhmlxNRI3ggCJA7jaCAu9Lt_65'
 
 
-@st.cache_resource
 
 # --- PyDrive2 + Service Account (Streamlit Cloud uyumlu) ---
 from pydrive2.auth import GoogleAuth
