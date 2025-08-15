@@ -41,8 +41,11 @@ _SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+# ---- Kimlik / İstemci yardımcıları ----
+from typing import Any, Optional
+
 def _get_sa_info() -> dict:
-    """st.secrets['gcp_service_account'] içeriğini döndürür; yoksa KeyError."""
+    """st.secrets['gcp_service_account'] içeriğini döndürür; yoksa boş dict."""
     return dict(st.secrets.get("gcp_service_account", {}))
 
 @st.cache_resource(show_spinner=False)
@@ -51,7 +54,6 @@ def get_drive_client():
     sa_info = _get_sa_info()
     if not sa_info:
         raise RuntimeError("Service Account bilgisi bulunamadı: st.secrets['gcp_service_account']")
-
     credentials = _LegacySA.from_json_keyfile_dict(sa_info, scopes=_SCOPES)
     gauth = GoogleAuth()
     gauth.credentials = credentials
@@ -67,20 +69,26 @@ def get_gspread_client():
     creds = _SA_Credentials.from_service_account_info(sa_info, scopes=_SCOPES)
     return gspread.authorize(creds)
 
-# ---- Cache yardımcıları ----
-def cache_data(ttl: int = 300):
-    """Kısa yol: @cache_data(ttl=300)."""
-    return st.cache_data(ttl=ttl, show_spinner=False)
+# ---- Lazy Drive yardımcıları (globalde kurma, ihtiyaçta kur) ----
+@st.cache_resource(show_spinner=False)
+def get_drive_or_none():
+    try:
+        return get_drive_client()
+    except Exception:
+        return None
 
-def cache_resource():
-    """Kısa yol: @cache_resource."""
-    return st.cache_resource(show_spinner=False)
+def ensure_drive():
+    """İhtiyaç anında Drive'ı kurar; kuramazsa None döner."""
+    key = "__drive_client__"
+    if key not in st.session_state:
+        st.session_state[key] = get_drive_or_none()
+    return st.session_state[key]
 
 # ---- Tarih & Para yardımcıları ----
 import pandas as _pd
 import numpy as _np
 
-def parse_date(s: Any) -> _pd.Timestamp | None:
+def parse_date(s: Any) -> Optional[_pd.Timestamp]:
     try:
         return _pd.to_datetime(s)
     except Exception:
@@ -106,7 +114,7 @@ def fmt_money(x: float, suffix: str = " USD") -> str:
 
 # ---- UI yardımcıları ----
 def confirm_modal(key: str, title: str, text: str) -> bool:
-    """Kritik işlemler için onay modalı. True dönerse onaylanmış demektir."""
+    """Kritik işlemler için onay modalı. True -> onaylandı."""
     opened = st.session_state.get(f"__modal_open_{key}", False)
     if st.button(title, key=f"btn_open_{key}"):
         st.session_state[f"__modal_open_{key}"] = True
@@ -125,17 +133,6 @@ def confirm_modal(key: str, title: str, text: str) -> bool:
                 return False
     return False
 
-# ---- Global drive nesnesi (yoksa) ----
-try:
-    _ = drive  # mevcutsa dokunma
-except NameError:
-    try:
-        drive = get_drive_client()
-    except Exception as e:
-        st.warning("Google Drive istemcisi oluşturulamadı. st.secrets ayarlarınızı kontrol edin.")
-        drive = None
-# ===========================
-
 # ---- Ana Sheet erişim yardımcıları ----
 import pandas as pd
 
@@ -145,7 +142,6 @@ def open_main_sheet():
     Ana Google Sheet'i açar.
     Öncelik: secrets.app.sheet_id -> yoksa kod içindeki SHEET_ID sabiti.
     """
-    # Önce secrets, yoksa sabit
     sheet_id = (st.secrets.get("app", {}).get("sheet_id", "") or SHEET_ID).strip()
     if not sheet_id:
         st.error("Ana Sheet ID tanımlı değil. secrets.app.sheet_id girin veya SHEET_ID sabitini doldurun.")
@@ -159,6 +155,7 @@ def open_main_sheet():
     except Exception as e:
         st.error(f"Ana Sheet açılamadı: {e}")
         st.stop()
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_ws(ws_name: str) -> pd.DataFrame:
     """Ana Sheet içindeki bir çalışma sayfasını DataFrame olarak döndürür."""
@@ -170,7 +167,7 @@ def load_ws(ws_name: str) -> pd.DataFrame:
         return pd.DataFrame()
     rows = ws.get_all_records()
     return pd.DataFrame(rows)
-
+    
 # === /Revizyon 1 bloğu ===
 # ===========================
 
