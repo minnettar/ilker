@@ -2345,7 +2345,9 @@ def _write_sheet_all(dfs: Dict[str, pd.DataFrame]):
     # Tüm sayfaları Google Sheets'e yaz (tam sayfa güncelleme)
     # gspread-dataframe kullanımı:
     try:
-
+        for sheet_name, df in dfs.items():
+            ws = sh.worksheet(sheet_name)
+            set_with_dataframe(ws, df)
     except Exception:
         st.error("gspread-dataframe kütüphanesi eksik. requirements.txt içine 'gspread-dataframe' ekleyin.")
         st.stop()
