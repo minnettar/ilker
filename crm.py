@@ -148,11 +148,10 @@ def confirm_modal(key: str, title: str, text: str) -> bool:
 
 # ---- Global drive nesnesi (yoksa) ----
 try:
-    drive = get_drive_client()
+    _ = drive  # mevcutsa dokunma
 except NameError:
     try:
-        # INIT REMOVED: lazy initialization will be used
-        # drive = get_drive()
+        drive = get_drive_client()
     except Exception as e:
         st.warning("Google Drive istemcisi oluşturulamadı. st.secrets ayarlarınızı kontrol edin.")
         drive = None
