@@ -85,6 +85,39 @@ ulke_listesi = sorted([
 
 temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIRIM", "FERHAT ŞEKEROĞLU"]
 
+# ===============================
+# --- SAFE NAME & PROFORMA KLASÖRÜ ---
+# ===============================
+
+def safe_name(text: str, maxlen: int = 120) -> str:
+    """
+    Google Drive için güvenli dosya/klasör adı üretir.
+    - Özel karakterleri temizler
+    - Maksimum uzunluğu sınırlar
+    """
+    import re
+    if not text:
+        return "UNNAMED"
+    text = str(text).strip()
+    text = re.sub(r'[<>:"/\\|?*]+', "_", text)  # Drive'ın sevmediği karakterler
+    return text[:maxlen]
+
+def get_proforma_yukleme_folder(proforma_no: str) -> str:
+    """
+    EVRAK_KLASOR_ID altında <Proforma No> klasörünü,
+    onun içinde de 'Yükleme Resimleri' alt klasörünü bulur/oluşturur ve ID döner.
+    """
+    if not EVRAK_KLASOR_ID:
+        return ""
+
+    # 1) Proforma klasörü
+    proforma_folder_id = get_or_create_child_folder(safe_name(proforma_no), EVRAK_KLASOR_ID)
+    if not proforma_folder_id:
+        return ""
+
+    # 2) Alt klasör: Yükleme Resimleri
+    return get_or_create_child_folder("Yükleme Resimleri", proforma_folder_id)
+
 # ===========================
 # ==== GOOGLE API SERVİSLERİ (Service Account)
 # ===========================
