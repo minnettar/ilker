@@ -404,12 +404,70 @@ def drive_access_smoketest(folder_id: str):
 # ==== DRIVE TESTİ
 # ===========================
 
-elif menu == "Drive Testi":
-    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Drive Testi</h2>", unsafe_allow_html=True)
-    st.info("EVRAK_KLASOR_ID için okuma-yazma yetkilerini hızlıca sınar.")
-    test_folder_id = st.text_input("Test edilecek Folder ID", value=EVRAK_KLASOR_ID)
-    if st.button("EVRAK klasörünü test et"):
-        drive_access_smoketest(test_folder_id)
+elif menu == "Drive Tanılama":
+    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>🧪 Drive Tanılama</h2>", unsafe_allow_html=True)
+    st.write("Bu sayfa, EVRAK klasör ID’nize erişimi ve yazma yetkisini test eder.")
+
+    st.text_input("EVRAK_KLASOR_ID", value=EVRAK_KLASOR_ID, disabled=True)
+
+    colA, colB = st.columns(2)
+    with colA:
+        if st.button("1) EVRAK klasörünü listele"):
+            try:
+                res = execute_with_retry(
+                    drive_svc.files().list(
+                        q=f"'{EVRAK_KLASOR_ID}' in parents and trashed = false",
+                        fields="files(id,name,mimeType)",
+                        includeItemsFromAllDrives=True,
+                        supportsAllDrives=True,
+                        pageSize=50
+                    )
+                )
+                st.success("Listeleme başarılı.")
+                st.json(res.get("files", []))
+            except HttpError as e:
+                st.error("Listeleme hatası (muhtemelen erişim):")
+                st.code(getattr(e, 'content', b'').decode('utf-8', errors='ignore'))
+            except Exception as e:
+                st.error(f"Listeleme istisnası: {e}")
+
+    with colB:
+        if st.button("2) Örnek klasör oluştur (Test_Proforma)"):
+            test_folder_id = get_or_create_child_folder("Test_Proforma", EVRAK_KLASOR_ID)
+            if test_folder_id:
+                st.success(f"Test_Proforma id: {test_folder_id}")
+            else:
+                st.error("Test_Proforma oluşturulamadı.")
+
+    st.markdown("---")
+    st.markdown("#### 3) Test_Proforma içine deneme dosyası yükle")
+
+    test_proforma_id = ""
+    try:
+        test_proforma_id = get_or_create_child_folder("Test_Proforma", EVRAK_KLASOR_ID)
+    except Exception:
+        pass
+
+    if test_proforma_id:
+        if st.button("Deneme dosyası yükle (hello.txt)"):
+            try:
+                content = f"Merhaba! Yükleme testi: {datetime.datetime.now().isoformat()}".encode("utf-8")
+                link = upload_bytes_to_folder(test_proforma_id, "hello.txt", content)
+                st.success("Yükleme başarılı.")
+                st.write("Dosya linki:")
+                st.write(link)
+            except Exception:
+                st.error("Yükleme başarısız. Yukarıdaki hata detaylarına bakınız.")
+    else:
+        st.info("Önce 'Örnek klasör oluştur' adımını çalıştırın.")
+
+    st.markdown("---")
+    st.caption("""
+- Eğer 1. adımda hata alıyorsanız: EVRAK klasörünü **service account** e-postasıyla (st.secrets['gcp_service_account']['client_email'])
+  *Düzenleyici* olarak paylaşın.
+- Shared Drive kullanıyorsanız, service account’a o drive’da **İçerik Yöneticisi** yetkisi verin.
+- Hâlâ hata varsa, hata çıktısını bana iletin (JSON döküm her şeyi söylüyor).
+""")
 
 # ===========================
 # ==== ŞIK SIDEBAR MENÜ
