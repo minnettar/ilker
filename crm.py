@@ -293,6 +293,8 @@ def update_excel():
     with open("temp.xlsx", "wb") as f:
         f.write(buffer.read())
 
+
+
 # ===========================
 # ==== GOOGLE SHEETS (MÜŞTERİ) SENKRON
 # ===========================
@@ -343,6 +345,72 @@ def push_customers_throttled():
         st.session_state["_last_sheet_write_ts"] = now
     return ok
 
+def drive_access_smoketest(folder_id: str):
+    st.markdown("### 🧪 Drive Erişim Testi")
+    if not folder_id:
+        st.error("Folder ID boş olamaz.")
+        return
+
+    # 1) Meta oku
+    st.write("1) Klasör meta bilgisi okunuyor…")
+    try:
+        meta = execute_with_retry(
+            drive_svc.files().get(fileId=folder_id, fields="id,name,mimeType")
+        )
+        st.success(f"OK: {meta.get('name')} ({meta.get('id')}) | {meta.get('mimeType')}")
+    except Exception as e:
+        st.error(f"Meta okuma HATASI: {e}")
+        return
+
+    # 2) İçerik listele (ilk 10)
+    st.write("2) İçerik listeleniyor…")
+    try:
+        lst = execute_with_retry(
+            drive_svc.files().list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                pageSize=10,
+                fields="files(id,name,mimeType,modifiedTime)"
+            )
+        )
+        files = lst.get("files", [])
+        st.success(f"Listeleme OK — {len(files)} öğe (ilk 10)")
+        if files:
+            st.table([{"name":f["name"], "mimeType":f["mimeType"], "modified":f["modifiedTime"], "id":f["id"]} for f in files])
+    except Exception as e:
+        st.error(f"Listeleme HATASI: {e}")
+        return
+
+    # 3) Yazma testi: dosya oluştur-sil
+    st.write("3) Yazma testi (oluştur → sil)…")
+    try:
+        fname = f"_crm_perm_test_{int(time.time())}.txt"
+        data = io.BytesIO(b"drive write test")
+        media = MediaIoBaseUpload(data, mimetype="text/plain", resumable=False)
+        created = execute_with_retry(
+            drive_svc.files().create(
+                body={"name": fname, "parents":[folder_id]},
+                media_body=media,
+                fields="id,name,webViewLink"
+            )
+        )
+        st.success(f"Oluşturma OK: {created.get('name')} — {created.get('webViewLink')}")
+        # sil
+        execute_with_retry(drive_svc.files().delete(fileId=created["id"]))
+        st.success("Silme OK: test dosyası kaldırıldı.")
+    except Exception as e:
+        st.error(f"Yazma/Silme HATASI: {e}")
+
+# ===========================
+# ==== DRIVE TESTİ
+# ===========================
+
+elif menu == "Drive Testi":
+    st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Drive Testi</h2>", unsafe_allow_html=True)
+    st.info("EVRAK_KLASOR_ID için okuma-yazma yetkilerini hızlıca sınar.")
+    test_folder_id = st.text_input("Test edilecek Folder ID", value=EVRAK_KLASOR_ID)
+    if st.button("EVRAK klasörünü test et"):
+        drive_access_smoketest(test_folder_id)
+
 # ===========================
 # ==== ŞIK SIDEBAR MENÜ
 # ===========================
@@ -360,6 +428,7 @@ menuler = [
     ("Fuar Müşteri Kayıtları","🎫"),
     ("Medya Çekmecesi","🗂️"),
     ("Satış Performansı","📈"),
+    ("Drive Testi","🧪"),  # <<--- BUNU EKLE
 ]
 
 if st.session_state.user == "Boss":
