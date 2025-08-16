@@ -119,6 +119,28 @@ def execute_with_retry(req, tries=5, base_sleep=0.6):
                 continue
             raise
 
+def safe_name(text: str, maxlen: int = 120) -> str:
+    s = str(text or "").strip().replace(" ", "_")
+    import re as _re
+    s = _re.sub(r'[\\/*?:"<>|]+', "_", s)
+    return s[:maxlen]
+
+def get_proforma_yukleme_folder(proforma_no: str) -> str:
+    """
+    Ana EVRAK_KLASOR_ID altında:
+      <Proforma No (sanitize)> / 'Yükleme Resimleri'
+    hiyerarşisini oluşturur ve 'Yükleme Resimleri' klasör ID'sini döndürür.
+    """
+    if not EVRAK_KLASOR_ID:
+        return ""
+    proforma_folder = get_or_create_child_folder(
+        safe_name(str(proforma_no), 100),
+        EVRAK_KLASOR_ID
+    )
+    if not proforma_folder:
+        return ""
+    return get_or_create_child_folder("Yükleme Resimleri", proforma_folder)
+
 def ensure_mime(filename: str, default="application/octet-stream"):
     mt, _ = mimetypes.guess_type(filename)
     return mt or default
