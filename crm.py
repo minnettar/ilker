@@ -88,38 +88,26 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 # ===============================
 # --- SAFE NAME & PROFORMA KLASÖRÜ ---
 # ===============================
-
 def safe_name(text: str, maxlen: int = 120) -> str:
-    """
-    Google Drive için güvenli dosya/klasör adı üretir.
-    - Özel karakterleri temizler
-    - Maksimum uzunluğu sınırlar
-    """
-    import re
-    if not text:
-        return "UNNAMED"
-    text = str(text).strip()
-    text = re.sub(r'[<>:"/\\|?*]+', "_", text)  # Drive'ın sevmediği karakterler
-    return text[:maxlen]
+    s = str(text or "").strip().replace(" ", "_")
+    s = re.sub(r'[\\/*?:"<>|]+', "_", s)
+    return s[:maxlen]
 
 def get_proforma_yukleme_folder(proforma_no: str) -> str:
     """
-    EVRAK_KLASOR_ID altında <Proforma No> klasörünü,
-    onun içinde de 'Yükleme Resimleri' alt klasörünü bulur/oluşturur ve ID döner.
+    Ana EVRAK_KLASOR_ID altında:
+      <Proforma No (sanitize)> / 'Yükleme Resimleri'
+    hiyerarşisini oluşturur ve 'Yükleme Resimleri' klasör ID'sini döndürür.
     """
     if not EVRAK_KLASOR_ID:
         return ""
-
-    # 1) Proforma klasörü
-    proforma_folder_id = get_or_create_child_folder(safe_name(proforma_no), EVRAK_KLASOR_ID)
-    if not proforma_folder_id:
+    proforma_folder = get_or_create_child_folder(safe_name(str(proforma_no), 100), EVRAK_KLASOR_ID)
+    if not proforma_folder:
         return ""
-
-    # 2) Alt klasör: Yükleme Resimleri
-    return get_or_create_child_folder("Yükleme Resimleri", proforma_folder_id)
+    return get_or_create_child_folder("Yükleme Resimleri", proforma_folder)
 
 # ===========================
-# ==== GOOGLE API SERVİSLERİ (Service Account)
+# ==== GOOGLE API SERVİSLERİ
 # ===========================
 @st.cache_resource
 def build_sheets():
@@ -141,7 +129,6 @@ sheets_svc = build_sheets()
 drive_svc  = build_drive()
 
 def execute_with_retry(req, tries=5, base_sleep=0.6):
-    """429/5xx durumlarında exponential backoff."""
     for i in range(tries):
         try:
             return req.execute()
@@ -157,7 +144,6 @@ def ensure_mime(filename: str, default="application/octet-stream"):
     return mt or default
 
 def upload_bytes_to_folder(folder_id: str, filename: str, data: bytes) -> str:
-    """Verilen baytı Drive’a yükler, webViewLink'i döner."""
     media = MediaIoBaseUpload(io.BytesIO(data), mimetype=ensure_mime(filename), resumable=False)
     file_meta = {"name": filename, "parents": [folder_id]}
     req = drive_svc.files().create(body=file_meta, media_body=media, fields="id, webViewLink")
@@ -181,50 +167,6 @@ def get_or_create_child_folder(name: str, parent_id: str) -> str:
     meta = {"name": name, "mimeType": "application/vnd.google-apps.folder", "parents": [parent_id]}
     created = execute_with_retry(drive_svc.files().create(body=meta, fields="id"))
     return created["id"]
-
-def safe_name(text: str, maxlen: int = 120) -> str:
-    s = str(text or "").strip().replace(" ", "_")
-    import re as _re
-    s = _re.sub(r'[\\/*?:"<>|]+', "_", s)
-    return s[:maxlen]
-
-def get_proforma_yukleme_folder(proforma_no: str) -> str:
-    """
-    Ana EVRAK_KLASOR_ID altında:
-      <Proforma No (sanitize)> / 'Yükleme Resimleri'
-    hiyerarşisini oluşturur ve 'Yükleme Resimleri' klasör ID'sini döndürür.
-    """
-    if not EVRAK_KLASOR_ID:
-        return ""
-    proforma_folder = get_or_create_child_folder(
-        safe_name(str(proforma_no), 100),
-        EVRAK_KLASOR_ID
-    )
-    if not proforma_folder:
-        return ""
-    return get_or_create_child_folder("Yükleme Resimleri", proforma_folder)
-
-# Logo indir (yoksa)
-if not os.path.exists(LOGO_LOCAL_NAME):
-    try:
-        download_file_to_path(LOGO_FILE_ID, LOGO_LOCAL_NAME)
-    except Exception as e:
-        st.warning(f"Logo indirilemedi: {e}")
-
-# Üst başlık
-c1, c2 = st.columns([3,7])
-with c1:
-    if os.path.exists(LOGO_LOCAL_NAME):
-        st.image(LOGO_LOCAL_NAME, width=300)
-with c2:
-    st.markdown("""
-    <style>.block-container{padding-top:.2rem!important}</style>
-    <div style="display:flex;flex-direction:column;align-items:flex-start;width:100%;margin-bottom:10px;">
-      <h1 style="color:#219A41;font-weight:bold;font-size:2.8em;letter-spacing:2px;margin:0;margin-top:-8px;">
-        ŞEKEROĞLU İHRACAT CRM
-      </h1>
-    </div>
-    """, unsafe_allow_html=True)
 
 # ===========================
 # ==== VERİ YÜKLEME (Lokal temp.xlsx)
