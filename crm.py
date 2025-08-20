@@ -497,13 +497,11 @@ elif menu == "Cari Ekleme":
         para_birimi = st.selectbox("Para Birimi", ["EURO", "USD", "TL", "RUBLE"])
         dt_secim = st.selectbox("DT Seçin", ["DT-1", "DT-2", "DT-3", "DT-4"])
         submitted = st.form_submit_button("Kaydet")
-
-        if submitted:
+if submitted:
     if not name.strip():
-        st.error("Müşteri adı boş olamaz!")
+        st.error("Müşteri adı boş olamaz!")   # BURASI 8 boşluk ile girintili olmalı
     else:
-        global df_musteri   # önce global'i bildiriyoruz
-        # === DataFrame güncelleme ===
+        global df_musteri
         new_row = {
             "Müşteri Adı": name,
             "Telefon": phone,
