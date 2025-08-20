@@ -2,12 +2,12 @@
 import streamlit as st
 import gspread
 import pandas as pd
-import json, base64, os
+import json, base64
 from google.oauth2.service_account import Credentials
 
 # -------------- CONFIG --------------
-SPREADSHEET_ID = os.getenv("GSHEET_ID", "BURAYA_SHEET_ID_YAZ")
-SA_JSON_B64    = os.getenv("GOOGLE_SA_JSON_B64", "")
+SPREADSHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE"   # Sheet ID açık
+SA_JSON_B64    = st.secrets["general"]["GOOGLE_SA_JSON_B64"]    # sadece JSON secrets'ta
 
 # -------------- GOOGLE SHEETS --------------
 @st.cache_resource
