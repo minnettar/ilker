@@ -169,16 +169,6 @@ def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
             df_eta = pd.read_excel(xls, "ETA") if "ETA" in xls.sheet_names else pd.DataFrame()
             df_fuar = pd.read_excel(xls, "FuarMusteri") if "FuarMusteri" in xls.sheet_names else pd.DataFrame()
 
-        # ✅ Eksik kolonları tamamla
-        df_m = ensure_required_columns(df_m, "Sayfa1")
-        df_k = ensure_required_columns(df_k, "Kayıtlar")
-        df_t = ensure_required_columns(df_t, "Teklifler")
-        df_p = ensure_required_columns(df_p, "Proformalar")
-        df_e = ensure_required_columns(df_e, "Evraklar")
-        df_eta = ensure_required_columns(df_eta, "ETA")
-        df_fuar = ensure_required_columns(df_fuar, "FuarMusteri")
-
-        return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
 
 # === Google Sheets Yazma Fonksiyonları ===
 def write_sheet(df: pd.DataFrame, sheet_name: str):
