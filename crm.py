@@ -44,7 +44,7 @@ def login():
         if u in USERS and USERS[u] == p:
             st.session_state["logged_in"] = True
             st.success("Giriş başarılı ✅")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Hatalı kullanıcı adı veya şifre")
     st.stop()
@@ -76,7 +76,7 @@ def customers_page():
     if st.button("Ekle"):
         append_row(ws, [name, email, phone])
         st.success("Müşteri eklendi ✅")
-        st.experimental_rerun()
+        st.rerun()
 
 def proformas_page():
     st.header("📄 Proforma Takip")
@@ -92,7 +92,7 @@ def proformas_page():
     if st.button("Proforma Kaydet"):
         append_row(ws, [no, cust, tutar, str(tarih), durum])
         st.success("Proforma kaydedildi ✅")
-        st.experimental_rerun()
+        st.rerun()
 
 def orders_page():
     st.header("📦 Güncel Sipariş Durumu")
@@ -109,7 +109,7 @@ def orders_page():
     if st.button("Sipariş Ekle"):
         append_row(ws, [no, cust, urun, miktar, durum, str(tarih)])
         st.success("Sipariş eklendi ✅")
-        st.experimental_rerun()
+        st.rerun()
 
 def vade_page():
     st.header("💰 Vade Takip")
@@ -125,7 +125,7 @@ def vade_page():
     if st.button("Vade Kaydet"):
         append_row(ws, [fatura, musteri, tutar, str(tarih), odendi])
         st.success("Vade eklendi ✅")
-        st.experimental_rerun()
+        st.rerun()
 
 def eta_page():
     st.header("🚢 ETA Takip")
@@ -140,7 +140,7 @@ def eta_page():
     if st.button("ETA Kaydet"):
         append_row(ws, [konteyner, urun, str(tarih), durum])
         st.success("ETA kaydedildi ✅")
-        st.experimental_rerun()
+        st.rerun()
 
 def sales_page():
     st.header("📈 Satış Performansı")
@@ -155,7 +155,7 @@ def sales_page():
     if st.button("Satış Kaydet"):
         append_row(ws, [musteri, tutar, str(tarih), satici])
         st.success("Satış kaydedildi ✅")
-        st.experimental_rerun()
+        st.rerun()
 
 def fairs_page():
     st.header("🎪 Fuar Kayıt")
@@ -170,7 +170,7 @@ def fairs_page():
     if st.button("Fuar Kaydet"):
         append_row(ws, [fuar, str(tarih), musteri, notlar])
         st.success("Fuar kaydedildi ✅")
-        st.experimental_rerun()
+        st.rerun()
 
 def tasks_page():
     st.header("📝 Görevler")
@@ -185,13 +185,13 @@ def tasks_page():
     if st.button("Görev Ekle"):
         append_row(ws, [gorev, sorumlu, str(tarih), durum])
         st.success("Görev eklendi ✅")
-        st.experimental_rerun()
+        st.rerun()
 
 def settings_page():
     st.header("⚙️ Ayarlar")
     if st.button("Çıkış Yap"):
         st.session_state["logged_in"] = False
-        st.experimental_rerun()
+        st.rerun()
 
 # -------------- MAIN --------------
 def main():
