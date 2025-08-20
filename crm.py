@@ -882,7 +882,6 @@ elif menu == "Proforma Takibi":
                             "Sipariş Formu": "",
                             "Sevk Durumu": ""
                         }
-                        global df_proforma
                         df_proforma = pd.concat([df_proforma, pd.DataFrame([new_row])], ignore_index=True)
                         update_excel()
                         st.success("Proforma eklendi!")
