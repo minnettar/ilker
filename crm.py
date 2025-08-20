@@ -223,24 +223,7 @@ def update_excel():
         df_eta.to_excel(writer, sheet_name="ETA", index=False)
         df_fuar.to_excel(writer, sheet_name="FuarMusteri", index=False)
 
-def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
-    """temp.xlsx varsa localden yükle, yoksa Google Sheets'ten oku"""
-    if not os.path.exists("temp.xlsx"):
-        # İlk açılış → Google Sheets'ten oku
-        return read_all_sheets()
-    else:
-        with pd.ExcelFile("temp.xlsx") as xls:
-            df_m = pd.read_excel(xls, "Sayfa1") if "Sayfa1" in xls.sheet_names else pd.DataFrame()
-            df_k = pd.read_excel(xls, "Kayıtlar") if "Kayıtlar" in xls.sheet_names else pd.DataFrame()
-            df_t = pd.read_excel(xls, "Teklifler") if "Teklifler" in xls.sheet_names else pd.DataFrame()
-            df_p = pd.read_excel(xls, "Proformalar") if "Proformalar" in xls.sheet_names else pd.DataFrame()
-            df_e = pd.read_excel(xls, "Evraklar") if "Evraklar" in xls.sheet_names else pd.DataFrame()
-            df_eta = pd.read_excel(xls, "ETA") if "ETA" in xls.sheet_names else pd.DataFrame()
-            df_fuar = pd.read_excel(xls, "FuarMusteri") if "FuarMusteri" in xls.sheet_names else pd.DataFrame()
-        return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
 
-# === Uygulama Başlangıcı ===
-df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar = load_frames_from_local()
 
 
 # ===========================
