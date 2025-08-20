@@ -130,16 +130,89 @@ def read_sheet(sheet_name: str) -> pd.DataFrame:
         st.error(f"{sheet_name} okunamadı: {e}")
         return pd.DataFrame()
 
-def read_all_sheets() -> Tuple[pd.DataFrame, ...]:
-    """Tüm sheetleri sırayla oku"""
-    df_m = read_sheet("Sayfa1")       # Müşteriler
-    df_k = read_sheet("Kayıtlar")
-    df_t = read_sheet("Teklifler")
-    df_p = read_sheet("Proformalar")
-    df_e = read_sheet("Evraklar")
-    df_eta = read_sheet("ETA")
-    df_fuar = read_sheet("FuarMusteri")
-    return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
+# === Beklenen Kolonlar ===
+REQUIRED_COLUMNS = {
+    "Sayfa1": [
+        "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke",
+        "Satış Temsilcisi", "Vade (Gün)", "Ödeme Şekli", "Kategori", "Durum"
+    ],
+    "Kayıtlar": [
+        "Müşteri Adı", "Tarih", "Tip", "Açıklama"
+    ],
+    "Teklifler": [
+        "Müşteri Adı", "Teklif No", "Tarih", "Durum", "Tutar"
+    ],
+    "Proformalar": [
+        "Müşteri Adı", "Proforma No", "Fatura No", "Tarih", "Tutar", "Durum"
+    ],
+    "Evraklar": [
+        "Müşteri Adı", "Belge Türü", "Dosya Adı", "Link"
+    ],
+    "ETA": [
+        "Müşteri Adı", "Ürün", "ETA Tarihi", "Kalan Gün"
+    ],
+    "FuarMusteri": [
+        "Müşteri Adı", "Fuar Adı", "E-mail", "Açıklamalar", "Görüşme Kalitesi"
+    ]
+}
+
+def ensure_required_columns(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
+    """DataFrame'de eksik kolon varsa ekler"""
+    required = REQUIRED_COLUMNS.get(sheet_name, [])
+    for col in required:
+        if col not in df.columns:
+            df[col] = ""
+    return df
+
+def read_sheet(sheet_name: str) -> pd.DataFrame:
+    """Google Sheets'ten oku, eksik kolonları tamamla"""
+    try:
+        sheet = sheets_svc.spreadsheets()
+        result = sheet.values().get(
+            spreadsheetId=SHEET_ID,
+            range=f"{sheet_name}!A1:ZZ"
+        ).execute()
+        values = result.get("values", [])
+        if not values:
+            st.warning(f"{sheet_name} sheet'i boş görünüyor.")
+            return ensure_required_columns(pd.DataFrame(), sheet_name)
+
+        if len(values) > 1:
+            header, rows = values[0], values[1:]
+            df = pd.DataFrame(rows, columns=header)
+        else:
+            header = values[0]
+            df = pd.DataFrame(columns=header)
+
+        return ensure_required_columns(df, sheet_name)
+
+    except Exception as e:
+        st.error(f"{sheet_name} okunamadı: {e}")
+        return ensure_required_columns(pd.DataFrame(), sheet_name)
+
+def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
+    if not os.path.exists("temp.xlsx"):
+        return read_all_sheets()
+    else:
+        with pd.ExcelFile("temp.xlsx") as xls:
+            df_m = pd.read_excel(xls, "Sayfa1") if "Sayfa1" in xls.sheet_names else pd.DataFrame()
+            df_k = pd.read_excel(xls, "Kayıtlar") if "Kayıtlar" in xls.sheet_names else pd.DataFrame()
+            df_t = pd.read_excel(xls, "Teklifler") if "Teklifler" in xls.sheet_names else pd.DataFrame()
+            df_p = pd.read_excel(xls, "Proformalar") if "Proformalar" in xls.sheet_names else pd.DataFrame()
+            df_e = pd.read_excel(xls, "Evraklar") if "Evraklar" in xls.sheet_names else pd.DataFrame()
+            df_eta = pd.read_excel(xls, "ETA") if "ETA" in xls.sheet_names else pd.DataFrame()
+            df_fuar = pd.read_excel(xls, "FuarMusteri") if "FuarMusteri" in xls.sheet_names else pd.DataFrame()
+
+        # ✅ Eksik kolonları tamamla
+        df_m = ensure_required_columns(df_m, "Sayfa1")
+        df_k = ensure_required_columns(df_k, "Kayıtlar")
+        df_t = ensure_required_columns(df_t, "Teklifler")
+        df_p = ensure_required_columns(df_p, "Proformalar")
+        df_e = ensure_required_columns(df_e, "Evraklar")
+        df_eta = ensure_required_columns(df_eta, "ETA")
+        df_fuar = ensure_required_columns(df_fuar, "FuarMusteri")
+
+        return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
 
 # === Google Sheets Yazma Fonksiyonları ===
 def write_sheet(df: pd.DataFrame, sheet_name: str):
