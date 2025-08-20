@@ -130,40 +130,6 @@ def read_sheet(sheet_name: str) -> pd.DataFrame:
         st.error(f"{sheet_name} okunamadı: {e}")
         return pd.DataFrame()
 
-# === Beklenen Kolonlar ===
-REQUIRED_COLUMNS = {
-    "Sayfa1": [
-        "Müşteri Adı", "Telefon", "E-posta", "Adres", "Ülke",
-        "Satış Temsilcisi", "Vade (Gün)", "Ödeme Şekli", "Kategori", "Durum"
-    ],
-    "Kayıtlar": [
-        "Müşteri Adı", "Tarih", "Tip", "Açıklama"
-    ],
-    "Teklifler": [
-        "Müşteri Adı", "Teklif No", "Tarih", "Durum", "Tutar"
-    ],
-    "Proformalar": [
-        "Müşteri Adı", "Proforma No", "Fatura No", "Tarih", "Tutar", "Durum"
-    ],
-    "Evraklar": [
-        "Müşteri Adı", "Belge Türü", "Dosya Adı", "Link"
-    ],
-    "ETA": [
-        "Müşteri Adı", "Ürün", "ETA Tarihi", "Kalan Gün"
-    ],
-    "FuarMusteri": [
-        "Müşteri Adı", "Fuar Adı", "E-mail", "Açıklamalar", "Görüşme Kalitesi"
-    ]
-}
-
-def ensure_required_columns(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
-    """DataFrame'de eksik kolon varsa ekler"""
-    required = REQUIRED_COLUMNS.get(sheet_name, [])
-    for col in required:
-        if col not in df.columns:
-            df[col] = ""
-    return df
-
 def read_sheet(sheet_name: str) -> pd.DataFrame:
     """Google Sheets'ten oku, eksik kolonları tamamla"""
     try:
