@@ -499,43 +499,43 @@ elif menu == "Cari Ekleme":
         submitted = st.form_submit_button("Kaydet")
 
     if submitted:
-    if not name.strip():
-        st.error("Müşteri adı boş olamaz!")
-    else:
-        new_row = {
-            "Müşteri Adı": name,
-            "Telefon": phone,
-            "E-posta": email,
-            "Adres": address,
-            "Ülke": ulke,
-            "Satış Temsilcisi": temsilci,
-            "Kategori": kategori,
-            "Durum": aktif_pasif,
-            "Vade (Gün)": vade_gun,
-            "Ödeme Şekli": odeme_sekli,
-            "Para Birimi": para_birimi,
-            "DT Seçimi": dt_secim,
-        }
-        df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
-        update_excel()
+        if not name.strip():
+            st.error("Müşteri adı boş olamaz!")
+        else:
+            new_row = {
+                "Müşteri Adı": name,
+                "Telefon": phone,
+                "E-posta": email,
+                "Adres": address,
+                "Ülke": ulke,
+                "Satış Temsilcisi": temsilci,
+                "Kategori": kategori,
+                "Durum": aktif_pasif,
+                "Vade (Gün)": vade_gun,
+                "Ödeme Şekli": odeme_sekli,
+                "Para Birimi": para_birimi,
+                "DT Seçimi": dt_secim,
+            }
+            df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
+            update_excel()
 
-        # === E-posta ===
-        yeni_cari_txt_olustur(new_row)
-        try:
-            send_email_with_txt(
-                to_email=["muhasebe@sekeroglugroup.com", "h.boy@sekeroglugroup.com"],
-                subject="Yeni Cari Açılışı",
-                body="Muhasebe için yeni cari açılışı ekte gönderilmiştir.",
-                file_path="yeni_cari.txt",
-            )
-            st.success("Müşteri eklendi ve e-posta gönderildi!")
-        except Exception as e:
-            st.warning(f"Müşteri eklendi ama e-posta gönderilemedi: {e}")
+            # === E-posta ===
+            yeni_cari_txt_olustur(new_row)
+            try:
+                send_email_with_txt(
+                    to_email=["muhasebe@sekeroglugroup.com", "h.boy@sekeroglugroup.com"],
+                    subject="Yeni Cari Açılışı",
+                    body="Muhasebe için yeni cari açılışı ekte gönderilmiştir.",
+                    file_path="yeni_cari.txt",
+                )
+                st.success("Müşteri eklendi ve e-posta gönderildi!")
+            except Exception as e:
+                st.warning(f"Müşteri eklendi ama e-posta gönderilemedi: {e}")
 
-        # === Google Sheets senkron ===
-        push_customers_throttled()
+            # === Google Sheets senkron ===
+            push_customers_throttled()
 
-        st.rerun()
+            st.rerun()
 
 # --- MÜŞTERİ LİSTESİ ---
 elif menu == "Müşteri Listesi":
