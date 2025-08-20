@@ -5,7 +5,7 @@ import numpy as np
 import io, os, re, time, tempfile, datetime, mimetypes
 from email.message import EmailMessage
 import smtplib
-
+from typing import Tuple
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
