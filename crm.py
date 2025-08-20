@@ -642,7 +642,6 @@ elif menu == "Görüşme / Arama / Ziyaret Kayıtları":
                 if not musteri_sec:
                     st.error("Lütfen bir müşteri seçiniz.")
                 else:
-                  df_kayit
                     new_row = {
                         "Müşteri Adı": musteri_sec,
                         "Tarih": str(tarih),   # string olarak kaydet
