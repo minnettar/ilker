@@ -499,28 +499,27 @@ elif menu == "Cari Ekleme":
         submitted = st.form_submit_button("Kaydet")
 
         if submitted:
-            if not name.strip():
-                st.error("Müşteri adı boş olamaz!")
-            else:
-                # === DataFrame güncelleme ===
-                global df_musteri
-                new_row = {
-                    "Müşteri Adı": name,
-                    "Telefon": phone,
-                    "E-posta": email,
-                    "Adres": address,
-                    "Ülke": ulke,
-                    "Satış Temsilcisi": temsilci,
-                    "Kategori": kategori,
-                    "Durum": aktif_pasif,
-                    "Vade (Gün)": vade_gun,
-                    "Ödeme Şekli": odeme_sekli,
-                    "Para Birimi": para_birimi,
-                    "DT Seçimi": dt_secim,
-                }
-                df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
-                update_excel()
-
+    if not name.strip():
+        st.error("Müşteri adı boş olamaz!")
+    else:
+        global df_musteri   # önce global'i bildiriyoruz
+        # === DataFrame güncelleme ===
+        new_row = {
+            "Müşteri Adı": name,
+            "Telefon": phone,
+            "E-posta": email,
+            "Adres": address,
+            "Ülke": ulke,
+            "Satış Temsilcisi": temsilci,
+            "Kategori": kategori,
+            "Durum": aktif_pasif,
+            "Vade (Gün)": vade_gun,
+            "Ödeme Şekli": odeme_sekli,
+            "Para Birimi": para_birimi,
+            "DT Seçimi": dt_secim,
+        }
+        df_musteri = pd.concat([df_musteri, pd.DataFrame([new_row])], ignore_index=True)
+        update_excel()
                 # === E-posta ===
                 yeni_cari_txt_olustur(new_row)
                 try:
