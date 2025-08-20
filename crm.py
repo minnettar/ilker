@@ -781,7 +781,6 @@ elif menu == "Fiyat Teklifleri":
                         "Durum": durum,
                         "PDF": pdf_link
                     }
-                    global df_teklif
                     df_teklif = pd.concat([df_teklif, pd.DataFrame([new_row])], ignore_index=True)
                     update_excel()
                     st.success("Teklif eklendi!")
