@@ -112,30 +112,84 @@ except Exception as e:
     st.error(f"Google API servisleri başlatılamadı: {e}")
     st.stop()
 
-# ===========================
-# ==== VERİ YÜKLEME (Lokal temp.xlsx)
-# ===========================
-def _empty_frames():
-    return (
-        pd.DataFrame(columns=["Müşteri Adı","Telefon","E-posta","Adres","Ülke","Satış Temsilcisi","Kategori","Durum","Vade (Gün)","Ödeme Şekli","Para Birimi","DT Seçimi"]),
-        pd.DataFrame(columns=["Müşteri Adı","Tarih","Tip","Açıklama"]),
-        pd.DataFrame(columns=["Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama","Durum","PDF"]),
-        pd.DataFrame(columns=["Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama","Durum","PDF","Sipariş Formu","Vade (gün)","Sevk Durumu","Termin Tarihi","Sevk Tarihi","Ulaşma Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli"]),
-        pd.DataFrame(columns=["Müşteri Adı","Proforma No","Fatura No","Fatura Tarihi","Vade (gün)","Vade Tarihi","Tutar","Ülke","Satış Temsilcisi","Ödeme Şekli",
-                              "Commercial Invoice","Sağlık Sertifikası","Packing List","Konşimento","İhracat Beyannamesi","Fatura PDF","Sipariş Formu","Yük Resimleri","EK Belgeler","Ödendi","Ödeme Kanıtı"]),
-        pd.DataFrame(columns=["Müşteri Adı","Proforma No","ETA Tarihi","Açıklama"]),
-        pd.DataFrame(columns=["Fuar Adı","Müşteri Adı","Ülke","Telefon","E-mail","Satış Temsilcisi","Açıklamalar","Görüşme Kalitesi","Tarih"])
-    )
+# === Google Sheets Okuma Fonksiyonları ===
+def read_sheet(sheet_name: str) -> pd.DataFrame:
+    """Verilen sheet adını Google Sheets'ten oku"""
+    try:
+        sheet = sheets_svc.spreadsheets()
+        result = sheet.values().get(
+            spreadsheetId=SHEET_ID,
+            range=f"{sheet_name}!A1:ZZ"
+        ).execute()
+        values = result.get("values", [])
+        if not values:
+            return pd.DataFrame()
+        header, rows = values[0], values[1:]
+        return pd.DataFrame(rows, columns=header)
+    except Exception as e:
+        st.error(f"{sheet_name} okunamadı: {e}")
+        return pd.DataFrame()
+
+def read_all_sheets() -> Tuple[pd.DataFrame, ...]:
+    """Tüm sheetleri sırayla oku"""
+    df_m = read_sheet("Sayfa1")       # Müşteriler
+    df_k = read_sheet("Kayıtlar")
+    df_t = read_sheet("Teklifler")
+    df_p = read_sheet("Proformalar")
+    df_e = read_sheet("Evraklar")
+    df_eta = read_sheet("ETA")
+    df_fuar = read_sheet("FuarMusteri")
+    return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
+
+# === Google Sheets Yazma Fonksiyonları ===
+def write_sheet(df: pd.DataFrame, sheet_name: str):
+    """DataFrame'i ilgili sheet'e yaz (overwrite eder)"""
+    if df is None or df.empty:
+        st.warning(f"{sheet_name} sheet'i boş, yazılacak veri yok.")
+        return False
+    try:
+        body = {"values": [df.columns.tolist()] + df.astype(str).values.tolist()}
+        sheets_svc.spreadsheets().values().update(
+            spreadsheetId=SHEET_ID,
+            range=f"{sheet_name}!A1",
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+        return True
+    except Exception as e:
+        st.error(f"{sheet_name} yazılamadı: {e}")
+        return False
+
+def write_all_sheets(
+    df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
+):
+    """Tüm DataFrame'leri ilgili sheetlere yaz"""
+    write_sheet(df_m, "Sayfa1")
+    write_sheet(df_k, "Kayıtlar")
+    write_sheet(df_t, "Teklifler")
+    write_sheet(df_p, "Proformalar")
+    write_sheet(df_e, "Evraklar")
+    write_sheet(df_eta, "ETA")
+    write_sheet(df_fuar, "FuarMusteri")
+
+# === Local Excel Fonksiyonları ===
+def update_excel():
+    """Tüm DataFrame'leri local temp.xlsx dosyasına kaydet"""
+    with pd.ExcelWriter("temp.xlsx", engine="openpyxl") as writer:
+        df_musteri.to_excel(writer, sheet_name="Sayfa1", index=False)
+        df_kayit.to_excel(writer, sheet_name="Kayıtlar", index=False)
+        df_teklif.to_excel(writer, sheet_name="Teklifler", index=False)
+        df_proforma.to_excel(writer, sheet_name="Proformalar", index=False)
+        df_evrak.to_excel(writer, sheet_name="Evraklar", index=False)
+        df_eta.to_excel(writer, sheet_name="ETA", index=False)
+        df_fuar.to_excel(writer, sheet_name="FuarMusteri", index=False)
 
 def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
+    """temp.xlsx varsa localden yükle, yoksa Google Sheets'ten oku"""
     if not os.path.exists("temp.xlsx"):
-        # Excel dosyası yoksa boş dataframeler oluştur
-        df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar = _empty_frames()
-        # ✅ İlk açılışta müşteri listesini Google Sheets'ten oku
-        df_m = read_customers_from_gsheet()
-        return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
+        # İlk açılış → Google Sheets'ten oku
+        return read_all_sheets()
     else:
-        # Var olan temp.xlsx'i yükle
         with pd.ExcelFile("temp.xlsx") as xls:
             df_m = pd.read_excel(xls, "Sayfa1") if "Sayfa1" in xls.sheet_names else pd.DataFrame()
             df_k = pd.read_excel(xls, "Kayıtlar") if "Kayıtlar" in xls.sheet_names else pd.DataFrame()
@@ -146,72 +200,9 @@ def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
             df_fuar = pd.read_excel(xls, "FuarMusteri") if "FuarMusteri" in xls.sheet_names else pd.DataFrame()
         return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
 
-def load_frames_from_local():
-    if os.path.exists("temp.xlsx"):
-        try: df_m = pd.read_excel("temp.xlsx", sheet_name="Sayfa1")
-        except Exception as e:
-            st.warning(f"Sayfa1 okunamadı: {e}")
-            df_m = pd.DataFrame()
+# === Uygulama Başlangıcı ===
+df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar = load_frames_from_local()
 
-        try: df_k = pd.read_excel("temp.xlsx", sheet_name="Kayıtlar")
-        except: df_k = pd.DataFrame(columns=["Müşteri Adı","Tarih","Tip","Açıklama"])
-
-        try: df_t = pd.read_excel("temp.xlsx", sheet_name="Teklifler")
-        except: df_t = pd.DataFrame(columns=["Müşteri Adı","Tarih","Teklif No","Tutar","Ürün/Hizmet","Açıklama","Durum","PDF"])
-
-        try: df_p = pd.read_excel("temp.xlsx", sheet_name="Proformalar")
-        except: df_p = pd.DataFrame()
-
-        try: df_e = pd.read_excel("temp.xlsx", sheet_name="Evraklar")
-        except: df_e = pd.DataFrame()
-
-        try: df_eta = pd.read_excel("temp.xlsx", sheet_name="ETA")
-        except: df_eta = pd.DataFrame(columns=["Müşteri Adı","Proforma No","ETA Tarihi","Açıklama"])
-
-        try: df_fuar = pd.read_excel("temp.xlsx", sheet_name="FuarMusteri")
-        except: df_fuar = pd.DataFrame(columns=["Fuar Adı","Müşteri Adı","Ülke","Telefon","E-mail","Satış Temsilcisi","Açıklamalar","Görüşme Kalitesi","Tarih"])
-
-        # Zorunlu kolonlar yoksa doldur
-        if df_m.empty:
-            df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar = _empty_frames()
-        else:
-            for col in ["Para Birimi","DT Seçimi"]:
-                if col not in df_m.columns:
-                    df_m[col] = ""
-
-            if df_p.empty:
-                df_p = pd.DataFrame(columns=["Müşteri Adı","Tarih","Proforma No","Tutar","Açıklama","Durum","PDF","Sipariş Formu","Vade (gün)","Sevk Durumu","Termin Tarihi","Sevk Tarihi","Ulaşma Tarihi","Ülke","Satış Temsilcisi","Ödeme Şekli"])
-
-            for c in ["Ülke","Satış Temsilcisi","Ödeme Şekli","Sevk Durumu","Termin Tarihi","Sevk Tarihi","Ulaşma Tarihi","Vade (gün)"]:
-                if c not in df_p.columns:
-                    df_p[c] = ""
-
-            if df_e.empty:
-                df_e = pd.DataFrame(columns=["Müşteri Adı","Proforma No","Fatura No","Fatura Tarihi","Vade (gün)","Vade Tarihi","Tutar","Ülke","Satış Temsilcisi","Ödeme Şekli",
-                                             "Commercial Invoice","Sağlık Sertifikası","Packing List","Konşimento","İhracat Beyannamesi","Fatura PDF","Sipariş Formu","Yük Resimleri","EK Belgeler","Ödendi","Ödeme Kanıtı"])
-            for c in ["Ödendi","Ödeme Kanıtı"]:
-                if c not in df_e.columns:
-                    df_e[c] = False if c == "Ödendi" else ""
-        return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
-    else:
-        return _empty_frames()
-
-df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar_musteri = load_frames_from_local()
-
-def update_excel():
-    """Lokal temp.xlsx günceller."""
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as w:
-        df_musteri.to_excel(w, sheet_name="Sayfa1", index=False)
-        df_kayit.to_excel(w, sheet_name="Kayıtlar", index=False)
-        df_teklif.to_excel(w, sheet_name="Teklifler", index=False)
-        df_proforma.to_excel(w, sheet_name="Proformalar", index=False)
-        df_evrak.to_excel(w, sheet_name="Evraklar", index=False)
-        df_eta.to_excel(w, sheet_name="ETA", index=False)
-        df_fuar_musteri.to_excel(w, sheet_name="FuarMusteri", index=False)
-    buffer.seek(0)
-    with open("temp.xlsx", "wb") as f:
-        f.write(buffer.read())
 
 # ===========================
 # ==== GOOGLE SHEETS (MÜŞTERİ) SENKRON
