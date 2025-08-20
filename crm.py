@@ -127,6 +127,25 @@ def _empty_frames():
         pd.DataFrame(columns=["Fuar Adı","Müşteri Adı","Ülke","Telefon","E-mail","Satış Temsilcisi","Açıklamalar","Görüşme Kalitesi","Tarih"])
     )
 
+def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
+    if not os.path.exists("temp.xlsx"):
+        # Excel dosyası yoksa boş dataframeler oluştur
+        df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar = _empty_frames()
+        # ✅ İlk açılışta müşteri listesini Google Sheets'ten oku
+        df_m = read_customers_from_gsheet()
+        return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
+    else:
+        # Var olan temp.xlsx'i yükle
+        with pd.ExcelFile("temp.xlsx") as xls:
+            df_m = pd.read_excel(xls, "Sayfa1") if "Sayfa1" in xls.sheet_names else pd.DataFrame()
+            df_k = pd.read_excel(xls, "Kayıtlar") if "Kayıtlar" in xls.sheet_names else pd.DataFrame()
+            df_t = pd.read_excel(xls, "Teklifler") if "Teklifler" in xls.sheet_names else pd.DataFrame()
+            df_p = pd.read_excel(xls, "Proformalar") if "Proformalar" in xls.sheet_names else pd.DataFrame()
+            df_e = pd.read_excel(xls, "Evraklar") if "Evraklar" in xls.sheet_names else pd.DataFrame()
+            df_eta = pd.read_excel(xls, "ETA") if "ETA" in xls.sheet_names else pd.DataFrame()
+            df_fuar = pd.read_excel(xls, "FuarMusteri") if "FuarMusteri" in xls.sheet_names else pd.DataFrame()
+        return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
+
 def load_frames_from_local():
     if os.path.exists("temp.xlsx"):
         try: df_m = pd.read_excel("temp.xlsx", sheet_name="Sayfa1")
