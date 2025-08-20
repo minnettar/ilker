@@ -1,103 +1,117 @@
 import streamlit as st
-import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-import datetime
 
-st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
+# ------------------------
+# CONFIG
+# ------------------------
+SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 
-# ==== LOGIN ====
-USERS = {
-    "export1": "Seker12345!",
-    "admin": "Seker12345!",
-    "Boss": "Seker12345!",
-}
-
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-def login_screen():
-    st.title("ŞEKEROĞLU CRM - Giriş Ekranı")
-    username = st.text_input("Kullanıcı Adı")
-    password = st.text_input("Şifre", type="password")
-    if st.button("Giriş Yap"):
-        if username in USERS and password == USERS[username]:
-            st.session_state.user = username
-            st.success("Giriş başarılı!")
-            st.rerun()
-        else:
-            st.error("Kullanıcı adı veya şifre hatalı.")
-
-if not st.session_state.user:
-    login_screen()
-    st.stop()
-
-if st.sidebar.button("Çıkış Yap"):
-    st.session_state.user = None
-    st.rerun()
-
-# ==== GOOGLE SHEETS BAĞLANTI ====
-SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE"
-
+# ------------------------
+# CONNECT GOOGLE SHEETS
+# ------------------------
 @st.cache_resource
 def connect_gsheets():
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
-    client = gspread.authorize(creds)
-    return client.open_by_key(SHEET_ID)
-
-sh = connect_gsheets()
-
-# ==== HELPER ====
-def load_data(sheet_name):
     try:
-        ws = sh.worksheet(sheet_name)
-        data = ws.get_all_records()
-        df = pd.DataFrame(data)
-        return df
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        client = gspread.authorize(creds)
+        sh = client.open_by_key(SHEET_ID)
+        return sh
     except Exception as e:
-        st.error(f"{sheet_name} yüklenemedi: {e}")
-        return pd.DataFrame()
+        st.error(f"Sheets bağlantı hatası: {e}")
+        return None
 
-# ==== MENÜ ====
-menu = st.sidebar.selectbox(
-    "Menü", 
-    ["Sayfa1 (Genel)", "Kayıtlar", "Teklifler", "Proformalar", "Evraklar", "ETA", "FuarMusteri"]
-)
+# ------------------------
+# LOGIN
+# ------------------------
+def login():
+    st.sidebar.header("🔑 Kullanıcı Girişi")
+    username = st.sidebar.text_input("Kullanıcı Adı")
+    password = st.sidebar.text_input("Şifre", type="password")
+    if st.sidebar.button("Giriş Yap"):
+        if username == "admin" and password == "1234":  # TODO: SQLite yapabilirsin
+            st.session_state["auth"] = True
+            st.experimental_rerun()
+        else:
+            st.sidebar.error("❌ Hatalı giriş bilgileri")
 
-if menu == "Sayfa1 (Genel)":
-    st.header("📌 Genel Kayıtlar (Sayfa1)")
-    df = load_data("Sayfa1")
-    st.dataframe(df, use_container_width=True)
+# ------------------------
+# MENU FUNCTIONS
+# ------------------------
+def menu_kayitlar(sh):
+    ws = sh.worksheet("Kayıtlar")
+    data = ws.get_all_records()
+    st.subheader("📋 Kayıtlar")
+    st.dataframe(data)
 
-elif menu == "Kayıtlar":
-    st.header("🗂️ Kayıtlar")
-    df = load_data("Kayıtlar")
-    st.dataframe(df, use_container_width=True)
+def menu_teklifler(sh):
+    ws = sh.worksheet("Teklifler")
+    data = ws.get_all_records()
+    st.subheader("📑 Teklifler")
+    st.dataframe(data)
 
-elif menu == "Teklifler":
-    st.header("📑 Teklifler")
-    df = load_data("Teklifler")
-    st.dataframe(df, use_container_width=True)
+def menu_proformalar(sh):
+    ws = sh.worksheet("Proformalar")
+    data = ws.get_all_records()
+    st.subheader("📄 Proformalar")
+    st.dataframe(data)
 
-elif menu == "Proformalar":
-    st.header("📄 Proformalar")
-    df = load_data("Proformalar")
-    st.dataframe(df, use_container_width=True)
+def menu_evraklar(sh):
+    ws = sh.worksheet("Evraklar")
+    data = ws.get_all_records()
+    st.subheader("📦 Evraklar")
+    st.dataframe(data)
 
-elif menu == "Evraklar":
-    st.header("📦 Evraklar")
-    df = load_data("Evraklar")
-    st.dataframe(df, use_container_width=True)
+def menu_eta(sh):
+    ws = sh.worksheet("ETA")
+    data = ws.get_all_records()
+    st.subheader("🚢 ETA Takibi")
+    st.dataframe(data)
 
-elif menu == "ETA":
-    st.header("🚢 ETA Takibi")
-    df = load_data("ETA")
-    st.dataframe(df, use_container_width=True)
+def menu_fuar(sh):
+    ws = sh.worksheet("FuarMusteri")
+    data = ws.get_all_records()
+    st.subheader("🎪 Fuar Kayıtları")
+    st.dataframe(data)
 
-elif menu == "FuarMusteri":
-    st.header("🎪 Fuar Müşteri Kayıtları")
-    df = load_data("FuarMusteri")
-    st.dataframe(df, use_container_width=True)
+# ------------------------
+# MAIN
+# ------------------------
+def main():
+    st.set_page_config(page_title="CRM", layout="wide")
+
+    if "auth" not in st.session_state or not st.session_state["auth"]:
+        login()
+        return
+
+    sh = connect_gsheets()
+    if not sh:
+        st.stop()
+
+    # Debug: mevcut sekmeleri yaz
+    st.sidebar.success(f"Sheets bağlantısı OK → Sekmeler: {[ws.title for ws in sh.worksheets()]}")
+
+    menu = st.sidebar.radio(
+        "Menü",
+        ["Kayıtlar", "Teklifler", "Proformalar", "Evraklar", "ETA", "Fuar"]
+    )
+
+    if menu == "Kayıtlar":
+        menu_kayitlar(sh)
+    elif menu == "Teklifler":
+        menu_teklifler(sh)
+    elif menu == "Proformalar":
+        menu_proformalar(sh)
+    elif menu == "Evraklar":
+        menu_evraklar(sh)
+    elif menu == "ETA":
+        menu_eta(sh)
+    elif menu == "Fuar":
+        menu_fuar(sh)
+
+# ------------------------
+if __name__ == "__main__":
+    main()
