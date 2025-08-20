@@ -114,23 +114,6 @@ except Exception as e:
 
 # === Google Sheets Okuma Fonksiyonları ===
 def read_sheet(sheet_name: str) -> pd.DataFrame:
-    """Verilen sheet adını Google Sheets'ten oku"""
-    try:
-        sheet = sheets_svc.spreadsheets()
-        result = sheet.values().get(
-            spreadsheetId=SHEET_ID,
-            range=f"{sheet_name}!A1:ZZ"
-        ).execute()
-        values = result.get("values", [])
-        if not values:
-            return pd.DataFrame()
-        header, rows = values[0], values[1:]
-        return pd.DataFrame(rows, columns=header)
-    except Exception as e:
-        st.error(f"{sheet_name} okunamadı: {e}")
-        return pd.DataFrame()
-
-def read_sheet(sheet_name: str) -> pd.DataFrame:
     """Google Sheets'ten oku, eksik kolonları tamamla"""
     try:
         sheet = sheets_svc.spreadsheets()
@@ -156,6 +139,7 @@ def read_sheet(sheet_name: str) -> pd.DataFrame:
         st.error(f"{sheet_name} okunamadı: {e}")
         return ensure_required_columns(pd.DataFrame(), sheet_name)
 
+
 def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
     if not os.path.exists("temp.xlsx"):
         return read_all_sheets()
@@ -168,6 +152,17 @@ def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
             df_e = pd.read_excel(xls, "Evraklar") if "Evraklar" in xls.sheet_names else pd.DataFrame()
             df_eta = pd.read_excel(xls, "ETA") if "ETA" in xls.sheet_names else pd.DataFrame()
             df_fuar = pd.read_excel(xls, "FuarMusteri") if "FuarMusteri" in xls.sheet_names else pd.DataFrame()
+
+        # ✅ Eksik kolonları tamamla
+        df_m = ensure_required_columns(df_m, "Sayfa1")
+        df_k = ensure_required_columns(df_k, "Kayıtlar")
+        df_t = ensure_required_columns(df_t, "Teklifler")
+        df_p = ensure_required_columns(df_p, "Proformalar")
+        df_e = ensure_required_columns(df_e, "Evraklar")
+        df_eta = ensure_required_columns(df_eta, "ETA")
+        df_fuar = ensure_required_columns(df_fuar, "FuarMusteri")
+
+        return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
 
 
 # === Google Sheets Yazma Fonksiyonları ===
@@ -189,6 +184,7 @@ def write_sheet(df: pd.DataFrame, sheet_name: str):
         st.error(f"{sheet_name} yazılamadı: {e}")
         return False
 
+
 def write_all_sheets(
     df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
 ):
@@ -200,6 +196,7 @@ def write_all_sheets(
     write_sheet(df_e, "Evraklar")
     write_sheet(df_eta, "ETA")
     write_sheet(df_fuar, "FuarMusteri")
+
 
 # === Local Excel Fonksiyonları ===
 def update_excel():
