@@ -1101,7 +1101,7 @@ elif menu == "Güncel Sipariş Durumu":
             if pd.notnull(row.get("PDF","")) and row.get("PDF",""):
                 links.append(f"<a href='{row['PDF']}' target='_blank'>Proforma PDF ({row['Proforma No']})</a>")
             if pd.notnull(row.get("Sipariş Formu","")) and row.get("Sipariş Formu",""):
-                fname = f"{row['Müşteri Adı']}__{row['Proforma No
+                fname = f"{row['Müşteri Adı']}__{row['Proforma No']}__{row['Fatura No']}"
 
 # --- FATURA & İHRACAT EVRAKLARI ---
 elif menu == "Fatura & İhracat Evrakları":
