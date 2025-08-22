@@ -9,6 +9,7 @@ from typing import Tuple
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+from googleapiclient.errors import HttpError
 
 # ===========================
 # ==== GENEL AYARLAR
@@ -112,7 +113,130 @@ except Exception as e:
     st.error(f"Google API servisleri başlatılamadı: {e}")
     st.stop()
 
+def safe_name(text, maxlen=120):
+    """Dosya ve klasör adları için güvenli bir isim üretir."""
+    s = str(text or "").strip().replace(" ", "_")
+    s = re.sub(r'[\\/*?:"<>|]+', "_", s)
+    return s[:maxlen]
+
+def get_or_create_child_folder(folder_name: str, parent_id: str) -> str:
+    """Verilen parent klasör içinde folder_name adlı alt klasörü döndürür; yoksa oluşturur."""
+    query = (
+        f"'{parent_id}' in parents and "
+        f"name='{folder_name}' and "
+        "mimeType='application/vnd.google-apps.folder' and trashed=false"
+    )
+    result = drive_svc.files().list(
+        q=query, spaces="drive", fields="files(id)", pageSize=1
+    ).execute()
+    files = result.get("files", [])
+    if files:
+        return files[0]["id"]
+    metadata = {
+        "name": folder_name,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id],
+    }
+    created = drive_svc.files().create(body=metadata, fields="id").execute()
+    return created.get("id")
+
+def upload_bytes_to_folder(folder_id: str, filename: str, data: bytes) -> str:
+    """Byte verisini Drive'da belirtilen klasöre yükler ve paylaşılabilir linki döndürür."""
+    file_metadata = {"name": filename, "parents": [folder_id]}
+    media = MediaIoBaseUpload(
+        io.BytesIO(data),
+        mimetype=mimetypes.guess_type(filename)[0] or "application/octet-stream",
+    )
+    uploaded = drive_svc.files().create(
+        body=file_metadata, media_body=media, fields="id, webViewLink"
+    ).execute()
+    return uploaded.get("webViewLink") or uploaded.get("id")
+
+
 # === Google Sheets Okuma Fonksiyonları ===
+
+def ensure_required_columns(df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
+    """Belirlenen zorunlu kolonları ekler, eksikleri boş değerle tamamlar."""
+    required_columns = {
+        "Sayfa1": {
+            "Müşteri Adı": "",
+            "Ülke": "",
+            "Telefon": "",
+            "E-posta": "",
+            "Adres": "",
+            "Satış Temsilcisi": "",
+            "Kategori": "",
+            "Durum": "",
+            "Vade (Gün)": "",
+            "Ödeme Şekli": "",
+            "Para Birimi": "",
+            "DT Seçimi": "",
+        },
+        "Kayıtlar": {
+            "Müşteri Adı": "",
+            "Tarih": "",
+            "Tip": "",
+            "Açıklama": "",
+        },
+        "Teklifler": {
+            "Müşteri Adı": "",
+            "Tarih": "",
+            "Teklif No": "",
+            "Tutar": "",
+            "Ürün/Hizmet": "",
+            "Açıklama": "",
+            "Durum": "",
+            "PDF": "",
+        },
+        "Proformalar": {
+            "Müşteri Adı": "",
+            "Tarih": "",
+            "Proforma No": "",
+            "Tutar": "",
+            "Vade (gün)": "",
+            "Açıklama": "",
+            "Durum": "",
+            "Sevk Durumu": "",
+            "Termin Tarihi": "",
+            "Sipariş Formu": "",
+            "Ulaşma Tarihi": "",
+        },
+        "Evraklar": {
+            "Müşteri Adı": "",
+            "Proforma No": "",
+            "Fatura No": "",
+            "Fatura Tarihi": "",
+            "Vade Tarihi": "",
+            "Tutar": "",
+            "Ödendi": False,
+            "Ödeme Kanıtı": "",
+        },
+        "ETA": {
+            "Müşteri Adı": "",
+            "Proforma No": "",
+            "ETA Tarihi": "",
+            "Açıklama": "",
+        },
+        "FuarMusteri": {
+            "Fuar Adı": "",
+            "Müşteri Adı": "",
+            "Ülke": "",
+            "Telefon": "",
+            "E-mail": "",
+            "Satış Temsilcisi": "",
+            "Açıklamalar": "",
+            "Görüşme Kalitesi": "",
+            "Tarih": "",
+        },
+    }
+
+    required = required_columns.get(sheet_name, {})
+    for col, default in required.items():
+        if col not in df.columns:
+            df[col] = default
+    return df
+
+
 def read_sheet(sheet_name: str) -> pd.DataFrame:
     """Google Sheets'ten oku, eksik kolonları tamamla"""
     try:
@@ -140,6 +264,18 @@ def read_sheet(sheet_name: str) -> pd.DataFrame:
         return ensure_required_columns(pd.DataFrame(), sheet_name)
 
 
+def read_all_sheets() -> Tuple[pd.DataFrame, ...]:
+    """Tüm sheet'leri okuyup DataFrame'leri döndür"""
+    df_m = read_sheet("Sayfa1")
+    df_k = read_sheet("Kayıtlar")
+    df_t = read_sheet("Teklifler")
+    df_p = read_sheet("Proformalar")
+    df_e = read_sheet("Evraklar")
+    df_eta = read_sheet("ETA")
+    df_fuar = read_sheet("FuarMusteri")
+    return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
+
+
 def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
     if not os.path.exists("temp.xlsx"):
         return read_all_sheets()
@@ -163,44 +299,13 @@ def load_frames_from_local() -> Tuple[pd.DataFrame, ...]:
         df_fuar = ensure_required_columns(df_fuar, "FuarMusteri")
 
         return df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
+        
+df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar = load_frames_from_local()
 
-
-# === Google Sheets Yazma Fonksiyonları ===
-def write_sheet(df: pd.DataFrame, sheet_name: str):
-    """DataFrame'i ilgili sheet'e yaz (overwrite eder)"""
-    if df is None or df.empty:
-        st.warning(f"{sheet_name} sheet'i boş, yazılacak veri yok.")
-        return False
-    try:
-        body = {"values": [df.columns.tolist()] + df.astype(str).values.tolist()}
-        sheets_svc.spreadsheets().values().update(
-            spreadsheetId=SHEET_ID,
-            range=f"{sheet_name}!A1",
-            valueInputOption="RAW",
-            body=body
-        ).execute()
-        return True
-    except Exception as e:
-        st.error(f"{sheet_name} yazılamadı: {e}")
-        return False
-
-
-def write_all_sheets(
-    df_m, df_k, df_t, df_p, df_e, df_eta, df_fuar
-):
-    """Tüm DataFrame'leri ilgili sheetlere yaz"""
-    write_sheet(df_m, "Sayfa1")
-    write_sheet(df_k, "Kayıtlar")
-    write_sheet(df_t, "Teklifler")
-    write_sheet(df_p, "Proformalar")
-    write_sheet(df_e, "Evraklar")
-    write_sheet(df_eta, "ETA")
-    write_sheet(df_fuar, "FuarMusteri")
-
-
-# === Local Excel Fonksiyonları ===
 def update_excel():
-    """Tüm DataFrame'leri local temp.xlsx dosyasına kaydet"""
+    """Persist global DataFrames to local Excel and optionally sync to Google Sheets."""
+    global df_musteri, df_kayit, df_teklif, df_proforma, df_evrak, df_eta, df_fuar
+
     with pd.ExcelWriter("temp.xlsx", engine="openpyxl") as writer:
         df_musteri.to_excel(writer, sheet_name="Sayfa1", index=False)
         df_kayit.to_excel(writer, sheet_name="Kayıtlar", index=False)
@@ -210,61 +315,39 @@ def update_excel():
         df_eta.to_excel(writer, sheet_name="ETA", index=False)
         df_fuar.to_excel(writer, sheet_name="FuarMusteri", index=False)
 
-
-
-
-# ===========================
-# ==== GOOGLE SHEETS (MÜŞTERİ) SENKRON
-# ===========================
-def _df_to_values(df: pd.DataFrame):
-    def _cell(v):
-        if pd.isna(v): return ""
-        if isinstance(v, (pd.Timestamp, datetime.date, datetime.datetime)):
-            try: return pd.to_datetime(v).date().isoformat()
-            except: return str(v)
-        if isinstance(v, (np.bool_, bool)): return bool(v)
-        return v
-    header = list(df.columns)
-    rows = df.applymap(_cell).values.tolist()
-    return [header] + rows
-
-def write_customers_to_gsheet(df_customers: pd.DataFrame) -> bool:
-    if "sheets_svc" not in globals() or sheets_svc is None:
-        st.error("Sheets servisi hazır değil!")
-        return False
+    # ✅ Optional: sync customers to Google Sheets
     try:
-        if df_customers is None or df_customers.empty:
-            st.warning("Müşteri tablosu boş, Sheets’e yazılacak bir şey yok.")
-            return False
-        sheet = sheets_svc.spreadsheets()
-        # clear
-        execute_with_retry(sheet.values().batchClear(
-            spreadsheetId=SHEET_ID,
-            body={"ranges":[f"{MUSTERI_SHEET_NAME}!A:ZZ"]}
-        ))
-        # write
-        values = _df_to_values(df_customers)
-        execute_with_retry(sheet.values().update(
-            spreadsheetId=SHEET_ID,
-            range=f"{MUSTERI_SHEET_NAME}!A1",
-            valueInputOption="RAW",
-            body={"values": values}
-        ))
-        st.info(f"{MUSTERI_SHEET_NAME} sayfasına {len(df_customers)} satır yazıldı.")
-        return True
+        write_customers_to_gsheet(df_musteri)
     except Exception as e:
-        st.error(f"Sheets yazma hatası: {e}")
-        return False
+        st.warning(f"Google Sheets güncellemesi başarısız: {e}")
 
-def push_customers_throttled():
-    now = datetime.datetime.utcnow().timestamp()
-    last = st.session_state.get("_last_sheet_write_ts", 0)
-    if now - last < 10:  # 10 sn içinde tekrar yazma (429 riski azalt)
-        return False
-    ok = write_customers_to_gsheet(df_musteri)
-    if ok:
-        st.session_state["_last_sheet_write_ts"] = now
-    return ok
+def execute_with_retry(request, retries: int = 3, wait: float = 1.0):
+    """Execute a Google API request with retry on rate limit or server errors."""
+    for attempt in range(retries):
+        try:
+            return request.execute()
+        except HttpError as err:
+            status = getattr(err, "resp", None)
+            status = getattr(status, "status", None)
+            if status in (429,) or (status is not None and 500 <= status < 600):
+                if attempt == retries - 1:
+                    raise
+                time.sleep(wait)
+            else:
+                raise
+
+
+def write_customers_to_gsheet(df: pd.DataFrame):
+    """Write customer DataFrame to the Google Sheet."""
+    values = [df.columns.tolist()] + df.fillna("").astype(str).values.tolist()
+    body = {"values": values}
+    request = sheets_svc.spreadsheets().values().update(
+        spreadsheetId=SHEET_ID,
+        range=f"{MUSTERI_SHEET_NAME}!A1",
+        valueInputOption="RAW",
+        body=body,
+    )
+    return execute_with_retry(request)
 
 # ===========================
 # ==== ŞIK SIDEBAR MENÜ
@@ -296,8 +379,6 @@ label_by_name = {n: f"{i} {n}" for (n,i) in allowed_menus}
 
 if "menu_state" not in st.session_state:
     st.session_state.menu_state = allowed_menus[0][0]
-
-st.sidebar.markdown(""" ... CSS KISMI SENİN KODDAKİYLE AYNI ... """, unsafe_allow_html=True)
 
 def _on_menu_change():
     sel_label = st.session_state.menu_radio_label
@@ -431,6 +512,7 @@ if menu == "Özet Ekran":
     st.markdown("---")
 
     # === Bekleyen Teklifler ===
+    st.markdown("#### 📄 Bekleyen Teklifler")
     if "Durum" in df_teklif.columns:
         bek_teklif = df_teklif[df_teklif["Durum"] == "Açık"].copy()
     else:
@@ -444,6 +526,7 @@ if menu == "Özet Ekran":
         st.dataframe(bek_teklif[["Müşteri Adı", "Tarih", "Teklif No", "Tutar", "Ürün/Hizmet", "Açıklama"]], use_container_width=True)
 
     # === Bekleyen Proformalar ===
+    st.markdown("#### 📄 Bekleyen Proformalar")
     if "Durum" in df_proforma.columns:
         bek_prof = df_proforma[df_proforma["Durum"] == "Beklemede"].copy()
     else:
@@ -457,6 +540,7 @@ if menu == "Özet Ekran":
         st.dataframe(bek_prof[["Müşteri Adı", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]], use_container_width=True)
 
     # === Sevk Bekleyen Siparişler ===
+    st.markdown("#### 🚚 Sevk Bekleyen Siparişler")
     for c in ["Sevk Durumu", "Ülke", "Termin Tarihi"]:
         if c not in df_proforma.columns:
             df_proforma[c] = ""
@@ -476,6 +560,7 @@ if menu == "Özet Ekran":
         st.dataframe(sevk_bekleyen[["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Termin Tarihi", "Tutar", "Vade (gün)", "Açıklama"]], use_container_width=True)
 
     # === ETA Takibi ===
+    st.markdown("#### 🛳️ ETA Takibi")
     eta_yolda = df_proforma[df_proforma.get("Sevk Durumu", "") == "Sevkedildi"].copy()
     toplam_eta = pd.to_numeric(eta_yolda.get("Tutar", []), errors="coerce").sum()
     st.markdown(f"<div style='font-size:1.1em;color:#c471f5;font-weight:bold;'>Toplam: {toplam_eta:,.2f} $</div>", unsafe_allow_html=True)
@@ -486,6 +571,7 @@ if menu == "Özet Ekran":
         st.dataframe(eta_yolda[["Müşteri Adı", "Ülke", "Proforma No", "Tarih", "Tutar", "Vade (gün)", "Açıklama"]], use_container_width=True)
 
     # === Son Teslim Edilenler ===
+    st.markdown("#### ✅ Son Teslim Edilenler")
     if "Sevk Durumu" in df_proforma.columns:
         teslim = df_proforma[df_proforma["Sevk Durumu"] == "Ulaşıldı"].copy()
         if not teslim.empty:
@@ -992,7 +1078,7 @@ elif menu == "Güncel Sipariş Durumu":
         (df_proforma["Durum"] == "Siparişe Dönüştü") & (~df_proforma["Sevk Durumu"].isin(["Sevkedildi","Ulaşıldı"]))
     ].copy()
 
-    for col in ["Termin Tarihi","Sipariş Formu","Ülke","Satış Temsilcisi","Ödeme Şekli"]:
+    for col in ["Termin Tarihi", "Sipariş Formu", "Ülke", "Satış Temsilcisi", "Ödeme Şekli", "Fatura No"]:
         if col not in siparisler.columns:
             siparisler[col] = ""
 
@@ -1076,8 +1162,8 @@ elif menu == "Güncel Sipariş Durumu":
             if pd.notnull(row.get("PDF","")) and row.get("PDF",""):
                 links.append(f"<a href='{row['PDF']}' target='_blank'>Proforma PDF ({row['Proforma No']})</a>")
             if pd.notnull(row.get("Sipariş Formu","")) and row.get("Sipariş Formu",""):
-                fname = f"{row['Müşteri Adı']}__{row['Proforma No']}__{row['Fatura No']}"
-
+                fname = f"{row['Müşteri Adı']}__{row['Proforma No']}__{row.get('Fatura No', '')}"
+                
 # --- FATURA & İHRACAT EVRAKLARI ---
 elif menu == "Fatura & İhracat Evrakları":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Fatura & İhracat Evrakları</h2>", unsafe_allow_html=True)
@@ -1202,11 +1288,6 @@ elif menu == "Vade Takibi":
     st.markdown("<h2 style='color:#219A41; font-weight:bold;'>Vade Takibi</h2>", unsafe_allow_html=True)
 
     ROOT_EXPORT_FOLDER_ID = EVRAK_KLASOR_ID
-
-    def safe_name(text, maxlen=120):
-        s = str(text or "").strip().replace(" ", "_")
-        s = re.sub(r'[\\/*?:"<>|]+', "_", s)
-        return s[:maxlen]
 
     def get_or_create_customer_folder(customer_name: str, parent_folder_id: str) -> str:
         return get_or_create_child_folder(safe_name(customer_name, 100), parent_folder_id)
@@ -1373,10 +1454,8 @@ elif menu == "ETA Takibi":
         filtre = (df_eta["Müşteri Adı"] == sec_musteri) & (df_eta["Proforma No"] == sec_proforma)
         mevcut_eta = df_eta.loc[filtre, "ETA Tarihi"].values[0] if filtre.any() else ""
         mevcut_aciklama = df_eta.loc[filtre, "Açıklama"].values[0] if filtre.any() else ""
-        try:
-            varsayilan_eta = pd.to_datetime(mevcut_eta).date() if mevcut_eta else datetime.date.today()
-        except Exception:
-            varsayilan_eta = datetime.date.today()
+        mevcut_eta = pd.to_datetime(mevcut_eta, errors="coerce")
+        varsayilan_eta = mevcut_eta.date() if not pd.isna(mevcut_eta) else datetime.date.today()
 
         # Form 1: Güncelle
         with st.form("edit_eta"):
@@ -1434,9 +1513,10 @@ elif menu == "ETA Takibi":
         df_eta["ETA Tarihi"] = pd.to_datetime(df_eta["ETA Tarihi"], errors="coerce")
         today = pd.to_datetime(datetime.date.today())
         df_eta["Kalan Gün"] = (df_eta["ETA Tarihi"] - today).dt.days
+        df_eta["Kalan Gün"] = df_eta["Kalan Gün"].astype("Int64")
 
         def highlight_days(val):
-            if pd.isna(val):
+            if val == "" or pd.isna(val):
                 return ''
             if val < 0:
                 return 'background-color: #ffcccc;'  # kırmızı
@@ -1444,7 +1524,8 @@ elif menu == "ETA Takibi":
                 return 'background-color: #fff3cd;'  # turuncu
             else:
                 return 'background-color: #d4edda;'  # yeşil
-
+                
+        df_eta["Kalan Gün"] = df_eta["Kalan Gün"].fillna("")
         tablo = df_eta[["Müşteri Adı", "Proforma No", "ETA Tarihi", "Kalan Gün", "Açıklama"]].copy()
         tablo = tablo.sort_values(["ETA Tarihi", "Müşteri Adı", "Proforma No"], ascending=[True, True, True])
         st.dataframe(tablo.style.applymap(highlight_days, subset=["Kalan Gün"]), use_container_width=True)
