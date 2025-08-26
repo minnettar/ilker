@@ -2,21 +2,40 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io, os, re, time, tempfile, datetime, mimetypes
+import io, os, re, time, tempfile, datetime, mimetypes, json, logging
 from email.message import EmailMessage
 import smtplib
 from typing import Tuple
+from pathlib import Path
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from googleapiclient.errors import HttpError
+from streamlit_option_menu import option_menu
 
 # ===========================
 # ==== GENEL AYARLAR
 # ===========================
 st.set_page_config(page_title="ŞEKEROĞLU İHRACAT CRM", layout="wide")
 
+# Load Bootstrap Icons for consistent menu visuals
+st.markdown(
+    '<link rel="stylesheet" '
+    'href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">',
+    unsafe_allow_html=True,
+)
+
+# Load custom sidebar styles
+
+sidebar_css = Path(__file__).resolve().parent / "css" / "sidebar.css"
+if sidebar_css.exists():
+    with sidebar_css.open() as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+else:
+    logging.warning("Sidebar CSS file not found at %s", sidebar_css)
+    
 # Sabitler (Kullanacağımız Drive klasörleri ve Sheets)
+
 SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
 MUSTERI_SHEET_NAME = "Sayfa1"
 
@@ -349,46 +368,74 @@ def write_customers_to_gsheet(df: pd.DataFrame):
     )
     return execute_with_retry(request)
 
+def push_customers_throttled(cooldown: int = 10):
+    """Push customers to Google Sheets with a simple cooldown."""
+    if "last_customer_push" not in st.session_state:
+        st.session_state.last_customer_push = 0.0
+
+    elapsed = time.time() - st.session_state.last_customer_push
+    if elapsed < cooldown:
+        remaining = int(cooldown - elapsed)
+        st.info(f"Lütfen {remaining} saniye sonra tekrar deneyin.")
+        return
+
+    try:
+        write_customers_to_gsheet(df_musteri)
+        st.success("Müşteriler Google Sheets'e yazıldı!")
+        st.session_state.last_customer_push = time.time()
+    except Exception as e:
+        st.error(f"Google Sheets güncellemesi başarısız: {e}")
+
+def _sanitize_vade(value):
+    numeric_value = pd.to_numeric(value, errors="coerce")
+    return int(numeric_value) if pd.notna(numeric_value) else 0
+
 # ===========================
 # ==== ŞIK SIDEBAR MENÜ
 # ===========================
 menuler = [
-    ("Özet Ekran","📊"),
-    ("Cari Ekleme","🧑‍💼"),
-    ("Müşteri Listesi","📒"),
-    ("Görüşme / Arama / Ziyaret Kayıtları","☎️"),
-    ("Fiyat Teklifleri","💰"),
-    ("Proforma Takibi","📄"),
-    ("Güncel Sipariş Durumu","🚚"),
-    ("Fatura & İhracat Evrakları","📑"),
-    ("Vade Takibi","⏰"),
-    ("ETA Takibi","🛳️"),
-    ("Fuar Müşteri Kayıtları","🎫"),
-    ("Medya Çekmecesi","🗂️"),
-    ("Satış Performansı","📈"),
+    ("Özet Ekran", "bar-chart"),
+    ("Cari Ekleme", "person-plus"),
+    ("Müşteri Listesi", "people"),
+    ("Görüşme / Arama / Ziyaret Kayıtları", "telephone"),
+    ("Fiyat Teklifleri", "currency-dollar"),
+    ("Proforma Takibi", "file-earmark-text"),
+    ("Güncel Sipariş Durumu", "truck"),
+    ("Fatura & İhracat Evrakları", "file-earmark"),
+    ("Vade Takibi", "clock"),
+    ("ETA Takibi", "calendar-event"),
+    ("Fuar Müşteri Kayıtları", "ticket"),
+    ("Medya Çekmecesi", "folder"),
+    ("Satış Performansı", "graph-up"),
 ]
 
 if st.session_state.user == "Boss":
-    allowed_menus = [("Özet Ekran","📊")]
+    allowed_menus = [("Özet Ekran", "bar-chart")]
 else:
     allowed_menus = menuler
 
-labels = [f"{i} {n}" for (n,i) in allowed_menus]
-name_by_label = {f"{i} {n}": n for (n,i) in allowed_menus}
-label_by_name = {n: f"{i} {n}" for (n,i) in allowed_menus}
+menu_names = [n for n, _ in allowed_menus]
+menu_icons = [i for _, i in allowed_menus]
 
-if "menu_state" not in st.session_state:
-    st.session_state.menu_state = allowed_menus[0][0]
+if "menu_state" not in st.session_state or st.session_state.menu_state not in menu_names:
+    st.session_state.menu_state = menu_names[0]
 
-def _on_menu_change():
-    sel_label = st.session_state.menu_radio_label
-    st.session_state.menu_state = name_by_label.get(sel_label, allowed_menus[0][0])
+default_idx = menu_names.index(st.session_state.menu_state)
 
-current_label = label_by_name.get(st.session_state.menu_state, labels[0])
-current_index = labels.index(current_label) if current_label in labels else 0
-st.sidebar.radio("Menü", labels, index=current_index, label_visibility="collapsed",
-                 key="menu_radio_label", on_change=_on_menu_change)
+# Display company logo above the menu if available
+if os.path.exists(LOGO_LOCAL_NAME):
+    st.sidebar.image(LOGO_LOCAL_NAME, use_column_width=True)
 
+with st.sidebar:
+    selected = option_menu(
+        menu_title=None,
+        options=menu_names,
+        icons=menu_icons,
+        default_index=default_idx,
+        key="menu_option_menu",
+    )
+
+st.session_state.menu_state = selected
 menu = st.session_state.menu_state
 
 # Sidebar: manuel senkron
@@ -667,7 +714,8 @@ elif menu == "Müşteri Listesi":
             "Düzenlemek istediğiniz müşteri kaydını seçiniz:",
             df_musteri.index,
             format_func=lambda i: f"{df_musteri.at[i, 'Müşteri Adı']} ({df_musteri.at[i, 'Ülke']})"
-        )
+         )
+            
         with st.form("edit_customer"):
             name = st.text_input("Müşteri Adı", value=df_musteri.at[secili_index_edit, "Müşteri Adı"])
             phone = st.text_input("Telefon", value=df_musteri.at[secili_index_edit, "Telefon"])
@@ -685,8 +733,9 @@ elif menu == "Müşteri Listesi":
             aktif_pasif = st.selectbox("Durum", ["Aktif", "Pasif"],
                                        index=["Aktif", "Pasif"].index(df_musteri.at[secili_index_edit, "Durum"])
                                        if df_musteri.at[secili_index_edit, "Durum"] in ["Aktif", "Pasif"] else 0)
+            vade_sanitized = _sanitize_vade(df_musteri.at[secili_index_edit, "Vade (Gün)"])
             vade_gun = st.number_input("Vade (Gün Sayısı)", min_value=0, max_value=365,
-                                       value=int(df_musteri.at[secili_index_edit, "Vade (Gün)"]) if pd.notna(df_musteri.at[secili_index_edit, "Vade (Gün)"]) else 0)
+                                       value=vade_sanitized)
             odeme_sekli = st.selectbox("Ödeme Şekli", ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"],
                                        index=["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"].index(df_musteri.at[secili_index_edit, "Ödeme Şekli"])
                                        if df_musteri.at[secili_index_edit, "Ödeme Şekli"] in ["Peşin", "Mal Mukabili", "Vesaik Mukabili", "Akreditif", "Diğer"] else 0)
@@ -1302,9 +1351,13 @@ elif menu == "Vade Takibi":
     today = pd.to_datetime(datetime.date.today())
     vade_df = df_evrak[df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])].reset_index()
 
+     # Sadece ödenmemiş ve vadeli kayıtlar
+    vade_df = df_evrak[df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])].reset_index()
+
     if vade_df.empty:
         st.info("Açık vade kaydı yok.")
     else:
+        # Her satır için bilgi + ödeme kanıtı yükleme + Ödendi checkbox
         for i, row in vade_df.iterrows():
             kalan = (row["Vade Tarihi"] - today).days
             mesaj = (
@@ -1312,16 +1365,26 @@ elif menu == "Vade Takibi":
                 f"| Proforma No: {row.get('Proforma No','')} | Fatura No: {row['Fatura No']} "
                 f"| Vade Tarihi: {row['Vade Tarihi'].date()} | Ödeme: {row.get('Ödeme Şekli','')}"
             )
+
             box = st.container(border=True)
             with box:
-                if kalan == 1: st.error(f"{mesaj} | **YARIN VADE DOLUYOR!**")
-                elif kalan < 0: st.warning(f"{mesaj} | **{abs(kalan)} gün GECİKTİ!**")
-                else: st.info(f"{mesaj} | {kalan} gün kaldı.")
+                if kalan == 1:
+                    st.error(f"{mesaj} | **YARIN VADE DOLUYOR!**")
+                elif kalan < 0:
+                    st.warning(f"{mesaj} | **{abs(kalan)} gün GECİKTİ!**")
+                else:
+                    st.info(f"{mesaj} | {kalan} gün kaldı.")
 
-                kanit_file = st.file_uploader("Ödeme Kanıtı (PDF/JPG/PNG/JPEG/WEBP)",
-                                              type=["pdf","jpg","jpeg","png","webp"], key=f"kanit_{i}")
-                prev_link = row.get("Ödeme Kanıtı","")
-                if prev_link: 
+                # Ödeme kanıtı uploader (çoklu format)
+                kanit_file = st.file_uploader(
+                    "Ödeme Kanıtı (PDF/JPG/PNG/JPEG/WEBP)",
+                    type=["pdf", "jpg", "jpeg", "png", "webp"],
+                    key=f"kanit_{i}"
+                )
+
+                # Daha önce yüklenmiş link varsa göster
+                prev_link = row.get("Ödeme Kanıtı", "")
+                if prev_link:
                     st.markdown(f"[Önceden yüklenmiş ödeme kanıtı]({prev_link})", unsafe_allow_html=True)
 
                 tick = st.checkbox(
@@ -1330,23 +1393,54 @@ elif menu == "Vade Takibi":
                 )
 
                 if tick:
+                    # Kanıt zorunlu
                     if kanit_file is None and not prev_link:
                         st.error("Lütfen önce **Ödeme Kanıtı** dosyası yükleyin (PDF/JPG/PNG…).")
                     else:
+                        # Eğer yeni dosya geldiyse Drive'a yükle
                         odeme_kaniti_url = prev_link
                         if kanit_file is not None:
+                            if not ROOT_EXPORT_FOLDER_ID:
+                                st.error("Ana klasör ID tanımlı değil; yükleme iptal edildi.")
+                                st.stop()
+
                             cust_folder_id = get_or_create_customer_folder(row["Müşteri Adı"], ROOT_EXPORT_FOLDER_ID)
-                            kanit_folder_id = get_or_create_child_folder("Odeme_Kanitlari", cust_folder_id)
+                            if not cust_folder_id:
+                                st.error("Müşteri klasörü oluşturulamadı; yükleme iptal edildi.")
+                                st.stop()
+
+                            # Müşteri altında 'Odeme_Kanitlari' alt klasörü
+                            kanit_folder_id = get_or_create_folder_by_name("Odeme_Kanitlari", cust_folder_id)
+                            if not kanit_folder_id:
+                                st.error("Ödeme kanıtı klasörü oluşturulamadı; yükleme iptal edildi.")
+                                st.stop()
+
+                            # Dosyayı geçici kaydet ve yükle
                             suffix = os.path.splitext(kanit_file.name)[1].lower() or ".pdf"
                             ts = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+                            fname = safe_name(f"OdemeKaniti__{row['Müşteri Adı']}__{row.get('Proforma No','')}__{row['Fatura No']}__{ts}") + suffix
 
-                            # ✅ HATA DÜZELTİLDİ (string kapatıldı + güvenli isimlendirme)
-                            fname = safe_name(
-                                f"OdemeKaniti__{row['Müşteri Adı']}__{row['Proforma No']}__{row['Fatura No']}__{ts}"
-                            ) + suffix
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fp:
+                                fp.write(kanit_file.read())
+                                temp_path = fp.name
 
-                            odeme_kaniti_url = upload_bytes_to_folder(kanit_folder_id, fname, kanit_file.getvalue())
+                            meta = {
+                                'title': fname,
+                                'parents': [{'id': kanit_folder_id}],
+                            }
+                            gfile = drive.CreateFile(meta)
+                            gfile.SetContentFile(temp_path)
+                            try:
+                                # supportsAllDrives => Shared Drive desteği
+                                gfile.Upload(param={'supportsAllDrives': True})
+                                odeme_kaniti_url = f"https://drive.google.com/file/d/{gfile['id']}/view?usp=sharing"
+                            except Exception as e:
+                                st.error(f"Ödeme kanıtı yüklenirken hata: {e}")
+                            finally:
+                                try: os.remove(temp_path)
+                                except: pass
 
+                        # Kayıt güncelle: kanıt linki + Ödendi = True
                         df_evrak.at[row['index'], "Ödeme Kanıtı"] = odeme_kaniti_url
                         df_evrak.at[row['index'], "Ödendi"] = True
                         update_excel()
@@ -1355,8 +1449,10 @@ elif menu == "Vade Takibi":
 
         st.markdown("#### Açık Vade Kayıtları")
         st.dataframe(
-            df_evrak[df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])]
-            [["Müşteri Adı","Ülke","Satış Temsilcisi","Ödeme Şekli","Proforma No","Fatura No","Fatura Tarihi","Vade (gün)","Vade Tarihi","Tutar"]],
+            df_evrak[
+                df_evrak["Vade Tarihi"].notna() & (~df_evrak["Ödendi"])
+            ][["Müşteri Adı", "Ülke", "Satış Temsilcisi", "Ödeme Şekli",
+               "Proforma No", "Fatura No", "Fatura Tarihi", "Vade (gün)", "Vade Tarihi", "Tutar"]],
             use_container_width=True
         )
 
