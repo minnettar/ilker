@@ -36,7 +36,7 @@ else:
     
 # Sabitler (Kullanacağımız Drive klasörleri ve Sheets)
 
-SHEET_ID = "1A_gL11UL6JFAoZrMrg92K8bAegeCn_KzwUyU8AWzE_0"
+SHEET_ID = "1C8OpNAIRySkWYTI9jBaboV-Rq85UbVD9"
 MUSTERI_SHEET_NAME = "Sayfa1"
 
 LOGO_FILE_ID = "1DCxtSsAeR7Zfk2IQU0UMGmD0uTdNO1B3"
