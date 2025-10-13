@@ -108,13 +108,6 @@ temsilci_listesi = ["KEMAL İLKER ÇELİKKALKAN", "HÜSEYİN POLAT", "EFE YILDIR
 # ===========================
 # ==== GOOGLE API SERVİSLERİ (Service Account)
 # ===========================
-@st.cache_resource
-def build_sheets():
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
 @st.cache_resource
 def build_drive():
